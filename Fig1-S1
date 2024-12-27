@@ -1,0 +1,86 @@
+# code for generating Figure 1, S1 code
+
+# external data links:
+# ENCODE histone marks:
+# KZFP chip: GSE20096, GSE78099, or https://tronoapps.epfl.ch/web/krabopedia/download.php, plus: 
+# pyTEnrich: https://alexdray86.github.io/pyTEnrich/build/html/index.html
+
+
+# JDUC part
+# 01 - data download
+# this is the search on encode
+# https://www.encodeproject.org/search/?searchTerm=histone+&type=Experiment&assay_title=Histone+ChIP-seq&target.label=H3K4me3&target.label=H3K4me1&target.label=H3K9me3&target.label=H3K27me3&target
+# .label=H3K27ac&target.label=H3K36me3&target.label=H3K23ac&target.label=H3K18ac&files.file_type=bed+narrowPeak&replicates.library.biosample.donor.organism.scientific_name=Homo+sapiens&perturbed=false&assembly=GRCh38
+mkdir -p ../data/download
+cd ../data/download/
+xargs -L 1 curl -O -J -L <../../scripts/files_encode.txt
+wget "https://www.encodeproject.org/metadata/?assay_title=Histone+ChIP-seq&target.label=H3K4me3&target.label=H3K4me1&target.label=H3K9me3&target.label=H3K27me3&target.label=H3K27ac&target.label=H3K36me3&target. label=H3K23ac&target.label=H3K18ac&files.file_type=bed+narrowPeak&replicates.library.biosample.donor.organism.scientific_name=Homo+sapiens& perturbed=false&assembly=GRCh38&searchTerm=histone+&type=Experiment&files.analyses.status=released&files.preferred_default=true" -O encode_metadata.txt
+
+# make the index for roadmap for giggle
+mkdir -p ../data/encode_bgzip
+find ../data/download -name *.bed.gz -exec cp {} ../data/encode_bgzip \;
+cd ../data/encode_bgzip && pigz -d -p 5 *.gz && cd -
+find ../data/encode_bgzip -name *.bed -exec bgzip {} -@ 8 \;
+
+mkdir -p ../data/encode_bgzip_hg19/
+for bed in ../data/encode_bgzip/*.gz; do
+	liftOver <(zcat $bed | cut -f1-4) ~/samba/resources/data/liftover/hg38ToHg19.over.chain.gz ../data/encode_bgzip_hg19/$(basename $bed .gz) /dev/null
+done
+find ../data/encode_bgzip_hg19 -name *.bed -exec bgzip {} -@ 8 \;
+
+# cd ../data/encode_bgzip
+# find ./sorted -name "*.bed" -exec bgzip {} -@ 4 \;
+#find ../data/encode_bgzip -name *.bed -exec bgzip {} -@ 4 \;
+#cd -
+
+# these files are problematic (see get_segfault)
+# ../data/encode_bgzip/ENCFF163UNF.bed.gz
+##../data/encode_bgzip/ENCFF248TMG.bed.gz
+#../data/encode_bgzip/ENCFF249CFP.bed.gz
+#../data/encode_bgzip/ENCFF386EDX.bed.gz
+#../data/encode_bgzip/ENCFF422VWG.bed.gz
+#../data/encode_bgzip/ENCFF492QLN.bed.gz
+#../data/encode_bgzip/ENCFF532OFC.bed.gz
+#../data/encode_bgzip/ENCFF718UFQ.bed.gz
+#../data/encode_bgzip/ENCFF769DCP.bed.gz
+#../data/encode_bgzip/ENCFF793XVH.bed.gz
+#../data/encode_bgzip/ENCFF826KUE.bed.gz
+#../data/encode_bgzip/ENCFF904EOT.bed.gz
+
+singularity exec docker://kubor/giggle-docker giggle index -i "../data/encode_bgzip_hg19/*.bed.gz" -o giggle_encode -f -s
+
+cp ~/samba/resources/data/krabs/human/hg19/hg19_peaks_un_filt/ZNF436_schmitges_vs_TI.bed ../data/ZNF436_schitges_raw_vs_TI.bed
+cp ~/samba/resources/data/krabs/human/hg19/hg19_peaks_un_filt_macs100/ZNF436_noid_vs_293T_TI_sampled_peaks_macs100.bed ../data/ZNF436_macs100_noid_vs_293T_TI_sampled_peaks_macs100.bed
+cp ~/samba/projects/danica/2009_chipseq_PRJNA307573/results/peaks/ChIP-seq_of_GFP-tagged_ZNF436_in_HEK293_cells_[ZNF436_rep1]_vs__peaks_macs80.bed ../data/
+
+# make the table of all the TE non overlapping any kZNF
+bedtools intersect -v -a pytenrich/db/hg19_TE_repmask_LTRm_s_20140131.bed.gz -b <(cat ../data/all_kzfp_bed_noSCAN/*.gz) | gzip -c >../data/all_kzfp_bed_noSCAN/TEnoKZNF_vs_TE_293T_peaks_macs80_tr.bed.gz
+
+#!/bin/bash
+
+#put hg19 beds in a folder
+mkdir -p ../data/hg19
+mv ../data/*37.bed ../data/hg19/
+
+#get pytenrich
+git clone ssh://git@c4science.ch/diffusion/11057/pytenrich.git
+cd pytenrich/
+chmod +x pyTEnrich.py
+
+#dependencies are not properly linked. For that we activate the environment
+conda activate /home/planet/.local/miniconda3/envs/pytenrich
+
+#get TE database
+mkdir db
+cp ~/samba/resources/data/ere/human/hg19/hg19_TE_repmask_LTRm_s_20140131.bed db/
+gzip db/hg19_TE_repmask_LTRm_s_20140131.bed
+
+#run it
+mkdir -p ../results/pyTEnrich_res
+cd pyteenric
+python3 pyTEnrich.py -i /home/duc/samba/projects/danica/2402_kzfp_encodeHistone/data/all_kzfp_bed/ -o /home/duc/samba/projects/danica/2402_kzfp_encodeHistone/results/pyTEnrich_res
+
+mkdir -p ../results/pyTEnrich_res_noSCAN
+cd pytenrich
+python3 pyTEnrich.py -i /home/duc/samba/projects/danica/2402_kzfp_encodeHistone/data/all_kzfp_bed_noSCAN/ -o /home/duc/samba/projects/danica/2402_kzfp_encodeHistone/results/pyTEnrich_res_noSCAN
+
