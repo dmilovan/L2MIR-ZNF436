@@ -5,8 +5,6 @@
 # KZFP chip: GSE20096, GSE78099, or https://tronoapps.epfl.ch/web/krabopedia/download.php, plus: 
 # pyTEnrich: https://alexdray86.github.io/pyTEnrich/build/html/index.html
 
-
-# JDUC part
 # 01 - data download
 # this is the search on encode
 # https://www.encodeproject.org/search/?searchTerm=histone+&type=Experiment&assay_title=Histone+ChIP-seq&target.label=H3K4me3&target.label=H3K4me1&target.label=H3K9me3&target.label=H3K27me3&target
