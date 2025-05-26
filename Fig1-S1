@@ -5,7 +5,9 @@
 # KZFP chip: GSE20096, GSE78099, or https://tronoapps.epfl.ch/web/krabopedia/download.php, plus: 
 # pyTEnrich: https://alexdray86.github.io/pyTEnrich/build/html/index.html
 
-# 01 - data download
+#################################################################################################################################################################################
+# bash
+# 01 - encode data download
 # this is the search on encode
 # https://www.encodeproject.org/search/?searchTerm=histone+&type=Experiment&assay_title=Histone+ChIP-seq&target.label=H3K4me3&target.label=H3K4me1&target.label=H3K9me3&target.label=H3K27me3&target
 # .label=H3K27ac&target.label=H3K36me3&target.label=H3K23ac&target.label=H3K18ac&files.file_type=bed+narrowPeak&replicates.library.biosample.donor.organism.scientific_name=Homo+sapiens&perturbed=false&assembly=GRCh38
@@ -14,12 +16,13 @@ cd ../data/download/
 xargs -L 1 curl -O -J -L <../../scripts/files_encode.txt
 wget "https://www.encodeproject.org/metadata/?assay_title=Histone+ChIP-seq&target.label=H3K4me3&target.label=H3K4me1&target.label=H3K9me3&target.label=H3K27me3&target.label=H3K27ac&target.label=H3K36me3&target. label=H3K23ac&target.label=H3K18ac&files.file_type=bed+narrowPeak&replicates.library.biosample.donor.organism.scientific_name=Homo+sapiens& perturbed=false&assembly=GRCh38&searchTerm=histone+&type=Experiment&files.analyses.status=released&files.preferred_default=true" -O encode_metadata.txt
 
-# make the index for roadmap for giggle
+# make the index for encode for giggle
 mkdir -p ../data/encode_bgzip
 find ../data/download -name *.bed.gz -exec cp {} ../data/encode_bgzip \;
 cd ../data/encode_bgzip && pigz -d -p 5 *.gz && cd -
 find ../data/encode_bgzip -name *.bed -exec bgzip {} -@ 8 \;
 
+# lifting files to hg19
 mkdir -p ../data/encode_bgzip_hg19/
 for bed in ../data/encode_bgzip/*.gz; do
 	liftOver <(zcat $bed | cut -f1-4) ~/samba/resources/data/liftover/hg38ToHg19.over.chain.gz ../data/encode_bgzip_hg19/$(basename $bed .gz) /dev/null
@@ -31,25 +34,7 @@ find ../data/encode_bgzip_hg19 -name *.bed -exec bgzip {} -@ 8 \;
 #find ../data/encode_bgzip -name *.bed -exec bgzip {} -@ 4 \;
 #cd -
 
-# these files are problematic (see get_segfault)
-# ../data/encode_bgzip/ENCFF163UNF.bed.gz
-##../data/encode_bgzip/ENCFF248TMG.bed.gz
-#../data/encode_bgzip/ENCFF249CFP.bed.gz
-#../data/encode_bgzip/ENCFF386EDX.bed.gz
-#../data/encode_bgzip/ENCFF422VWG.bed.gz
-#../data/encode_bgzip/ENCFF492QLN.bed.gz
-#../data/encode_bgzip/ENCFF532OFC.bed.gz
-#../data/encode_bgzip/ENCFF718UFQ.bed.gz
-#../data/encode_bgzip/ENCFF769DCP.bed.gz
-#../data/encode_bgzip/ENCFF793XVH.bed.gz
-#../data/encode_bgzip/ENCFF826KUE.bed.gz
-#../data/encode_bgzip/ENCFF904EOT.bed.gz
-
 singularity exec docker://kubor/giggle-docker giggle index -i "../data/encode_bgzip_hg19/*.bed.gz" -o giggle_encode -f -s
-
-cp ~/samba/resources/data/krabs/human/hg19/hg19_peaks_un_filt/ZNF436_schmitges_vs_TI.bed ../data/ZNF436_schitges_raw_vs_TI.bed
-cp ~/samba/resources/data/krabs/human/hg19/hg19_peaks_un_filt_macs100/ZNF436_noid_vs_293T_TI_sampled_peaks_macs100.bed ../data/ZNF436_macs100_noid_vs_293T_TI_sampled_peaks_macs100.bed
-cp ~/samba/projects/danica/2009_chipseq_PRJNA307573/results/peaks/ChIP-seq_of_GFP-tagged_ZNF436_in_HEK293_cells_[ZNF436_rep1]_vs__peaks_macs80.bed ../data/
 
 # make the table of all the TE non overlapping any kZNF
 bedtools intersect -v -a pytenrich/db/hg19_TE_repmask_LTRm_s_20140131.bed.gz -b <(cat ../data/all_kzfp_bed_noSCAN/*.gz) | gzip -c >../data/all_kzfp_bed_noSCAN/TEnoKZNF_vs_TE_293T_peaks_macs80_tr.bed.gz
@@ -60,25 +45,485 @@ bedtools intersect -v -a pytenrich/db/hg19_TE_repmask_LTRm_s_20140131.bed.gz -b 
 mkdir -p ../data/hg19
 mv ../data/*37.bed ../data/hg19/
 
-#get pytenrich
-git clone ssh://git@c4science.ch/diffusion/11057/pytenrich.git
-cd pytenrich/
-chmod +x pyTEnrich.py
-
-#dependencies are not properly linked. For that we activate the environment
-conda activate /home/planet/.local/miniconda3/envs/pytenrich
-
-#get TE database
+# get TE database
 mkdir db
 cp ~/samba/resources/data/ere/human/hg19/hg19_TE_repmask_LTRm_s_20140131.bed db/
-gzip db/hg19_TE_repmask_LTRm_s_20140131.bed
+gzip db/hg19_TE_repmask_LTRm_s_20140131.bed # TE anno file
 
-#run it
-mkdir -p ../results/pyTEnrich_res
-cd pyteenric
-python3 pyTEnrich.py -i /home/duc/samba/projects/danica/2402_kzfp_encodeHistone/data/all_kzfp_bed/ -o /home/duc/samba/projects/danica/2402_kzfp_encodeHistone/results/pyTEnrich_res
-
+# run pyTEnrich for computing KZFP enrichment over the TE families/subfamilies, based on the the KZFP ChIP data
 mkdir -p ../results/pyTEnrich_res_noSCAN
 cd pytenrich
 python3 pyTEnrich.py -i /home/duc/samba/projects/danica/2402_kzfp_encodeHistone/data/all_kzfp_bed_noSCAN/ -o /home/duc/samba/projects/danica/2402_kzfp_encodeHistone/results/pyTEnrich_res_noSCAN
+
+#################################################################################################################################################################################
+# python
+# 02 - pyTEnrich KZFP over tE
+
+# singularity exec docker://registry.c4science.ch/lvg/pyenv:v3 ipython --no-autoindent
+from os.path import basename
+import os
+from glob import glob
+import pandas as pd
+from pybedtools import BedTool
+from tqdm import tqdm
+import pybedtools
+
+te = BedTool(
+    "/home/duc/samba/resources/data/ere/human/hg19/1811_hg19_TE_repmask_LTRm_s_20140131.bed"
+)
+tefiles = glob(
+    "/home/duc/samba/resources/data/ere/human/hg19/1811_beds_subFam/*.bed.gz"
+)
+znfs = glob("../data/all_kzfp_bed_noSCAN/*.bed")
+znfs = znfs + ["../../2309_kzfp_encodeTF/data/ZNF436_schitges_raw_vs_TI.bed"]
+znfs = znfs + [
+    "../../2309_kzfp_encodeTF/data/ZNF436_macs100_noid_vs_293T_TI_sampled_peaks_macs100.bed"
+]
+znfs = znfs + [
+    "../../2309_kzfp_encodeTF/data/ChIP-seq_of_GFP-tagged_ZNF436_in_HEK293_cells_[ZNF436_rep1]_vs__peaks_macs80.bed"
+]
+
+histones = glob("../data/encode_bgzip_hg19/*.gz")
+
+enrich_tables = glob("../results/pyTEnrich_res_noSCAN/results/*SUBFAM.tsv")
+
+res = []
+res_export = []
+for tab in enrich_tables:
+    tmp = pd.read_csv(tab, sep="\t")
+    zname = basename(tab).split("_vs_")[0]
+    tmp["ZNF"] = basename(tab).split("_vs_")[0]
+    tmp = tmp.rename({"Unnamed: 0": "subfam_name"}, axis=1)
+    res.append(tmp[["subfam_name", "ZNF", "padj.final"]])
+    res_export.append(tmp)
+
+enrich_table = pd.concat(res)
+pd.concat(res_export).to_csv("../results/pyTEnrich_res_noSCAN_allZNF.csv", index=False)
+
+enrich_table_sig = enrich_table.loc[enrich_table["padj.final"] < 0.01]
+# def do_encode(tefam_name, znfname, inbed):
+#     res = []
+#     for histone in histones:
+#         ct = basename(histone).replace(".bed", "")
+#         mark = histone.split("/")[3]
+#         histone_bed = BedTool(histone)
+#         pval = inbed.fisher(histone_bed, genome="hg19").right_tail
+#         res.append([mark, tefam_name, znfname, ct, pval])
+#     return res
+#
+os.makedirs("../results/te_w_peaks", exist_ok=True)
+
+
+for znf in tqdm(znfs):
+    znfname = basename(znf).replace(".bed", "")
+    znf_bed = BedTool(znf)
+    os.makedirs(f"../results/te_w_peaks/{znfname}", exist_ok=True)
+    enrich_fam = enrich_table_sig.loc[
+        enrich_table_sig["ZNF"] == basename(znf).split("_vs_")[0], "subfam_name"
+    ].values
+    for tefam in enrich_fam:
+        if tefam == "nonTE":
+            continue
+        tefile = [t for t in tefiles if basename(t).split(".bed")[0] == tefam]
+        assert len(tefile) == 1
+        tebed = BedTool(tefile[0])
+        te_w_peaks = tebed.intersect(znf_bed, u=True)
+        te_w_peaks.saveas(f"../results/te_w_peaks/{znfname}/{tefam}_{znfname}.bed")
+    pybedtools.cleanup()
+
+# make the rest
+# for znf in tqdm(znfs):
+#     znfname = basename(znf).replace(".bed", "")
+#     znf_bed = BedTool(znf)
+#     all_target = []
+#     for target in glob(f"../results/te_w_peaks/{znfname}_*"):
+#         if "rest" not in target:
+#             try:
+#                 beddf = pd.read_csv(target, sep="\t", header=None)
+#                 all_target.append(beddf)
+#             except:
+#                 next
+#     if all_target == []:
+#         continue
+#     all_target = BedTool.from_dataframe(pd.concat(all_target))
+#     rest = znf_bed.intersect(all_target, v=True)
+#     rest_on_te = rest.intersect(te, u=True)
+#     rest_on_te.saveas(f"../results/te_w_peaks/{znfname}_rest_in_te.bed")
+#     rest_no_te = rest.intersect(te, v=True)
+#     rest_no_te.saveas(f"../results/te_w_peaks/{znfname}_rest_out_te.bed")
+
+# TE bound at least 1 vs TE never bound separation
+allznfsdf = pd.concat(
+    [
+        pd.read_csv(f, sep="\t", header=None).iloc[:, 0:3]
+        for f in znfs
+        if os.stat(f).st_size != 0 and "TEno" not in f
+    ]
+)
+
+allznfbed = BedTool.from_dataframe(allznfsdf)
+
+# for each TE subfam do the bound not bound by any
+os.makedirs("../results/beds", exist_ok=True)
+for tebed in tefiles:
+    tename = os.path.basename(tebed).replace(".bed.gz", "")
+    te = BedTool(tebed)
+    tebound = te.intersect(allznfbed, u=True)
+    teneverbound = te.intersect(allznfbed, v=True)
+    print(tename, len(tebound), len(teneverbound), sep="\t")
+    tebound.saveas(f"../results/beds/{tename}_bound_anyZNF.bed")
+    teneverbound.saveas(f"../results/beds/{tename}_never_bound_anyZNF.bed")
+
+################################################################################################################################################################################
+# bash 
+# 03 - giggle enrichment
+
+# running giggle for anno overlaps 
+#!/bin/bahs
+docker="singularity exec docker://kubor/giggle-docker" # using public image
+
+for znf in ../results/peaks_on_te/*.bed; do
+	sem --id bgzip --jobs 20 bgzip $znf
+done
+
+sem --id bgzip --wait
+
+mkdir -p ../results/giggle_results
+
+for znf in ../results/peaks_on_te/*.bed.gz; do
+	echo $znf
+	bname=$(basename $znf .bed.gz)
+	out=$(echo $bname | awk -F "_vs_" '{print $1}')
+	TE=$(echo $bname | awk -F "peaks_" '{print $2}')
+	mkdir -p ../results/giggle_results/$out
+	sem --id giggle --jobs 20 "$docker giggle search -i giggle_encode -s -q $znf > ../results/giggle_results/${out}/${out}-${TE}-encode_giggle.tsv"
+done
+sem --id giggle --wait
+
+# we also want to giggle only the ZNF without the TE
+for znf in ../data/all_kzfp_bed/*.bed; do
+	sem --id bgzip --jobs 20 bgzip $znf
+done
+sem --id bgzip --wait
+
+for znf in ../data/all_kzfp_bed/*.bed.gz; do
+	echo $znf
+	bname=$(basename $znf .bed.gz)
+	out=$(echo $bname | awk -F "_vs_" '{print $1}')
+	mkdir -p ../results/giggle_results_ZNF
+	sem --id giggle --jobs 20 "$docker giggle search -i giggle_encode -s -q $znf > ../results/giggle_results_ZNF/${out}-encode_giggle.tsv"
+done
+sem --id giggle --wait
+
+#### With the TE centric approach (TE with a peak)
+for znf in $(find ../results/te_w_peaks/ -name "*.bed"); do
+	sem --id bgzip --jobs 28 bgzip $znf
+done
+
+mkdir -p ../results/giggle_results_TE
+for znf in $(find ../results/te_w_peaks/ -name "*.gz"); do
+	echo $znf
+	bname=$(basename $znf .bed.gz)
+	dirname=$(echo $znf | awk -F'/' '{print $(NF-1)}')
+	out=$(echo $bname | awk -F "_vs_" '{print $1}')
+	mkdir -p ../results/giggle_results_TE/$dirname
+	sem --id giggle --jobs 28 "$docker giggle search -i giggle_encode -s -q $znf > ../results/giggle_results_TE/${dirname}/${out}-encode_giggle.tsv"
+done
+
+
+#################################################################################################################################################################################
+# python
+# 04 - parse giggle data 
+
+# singularity exec docker://registry.c4science.ch/lvg/pyenv:v3 ipython --no-autoindent
+
+import pandas as pd
+import numpy as np
+import os
+from tqdm import tqdm
+from glob import glob
+from os.path import basename
+import seaborn as sns
+from matplotlib import pyplot as plt
+import requests, json
+
+
+meta = pd.read_csv("encode_metadata.txt", sep="\t")
+meta.set_index("File accession", inplace=True)
+
+cols = ["blue", "red", "orange", "black", "green", "pink"]
+hmarks = ["H3K27ac", "H3K27me3", "H3K36me3", "H3K4me1", "H3K4me3", "H3K9me3"]
+Hcolor = {}
+for h, c in zip(hmarks, cols):
+    Hcolor[h] = c
+
+giggle_res = glob("../results/giggle_results_TE/**/*.tsv")
+znfs = glob("../results/giggle_results_TE/*")
+znfs = [basename(z) for z in znfs]
+
+tes = set()
+
+for n in giggle_res:
+    name = basename(n)
+    thedir = n.split("/")[-2].split("_vs")[0]
+    te = name.replace("_" + thedir + "-encode_giggle.tsv", "")
+    tes.add(te)
+
+
+def read_giggle(file, te):
+    try:
+        giggle = pd.read_table(file, sep="\t", index_col=False)
+    except:
+        print(file)
+        return pd.DataFrame()
+    znf = file.split("/")[3]
+    histone_tissue = (
+        giggle["#file"].str.split("/").apply(lambda x: x[1].replace(".bed.gz", ""))
+    )
+    giggle.insert(loc=1, column="TEsubFam", value=te)
+    giggle.insert(loc=2, column="ZNF", value=znf)
+    giggle.insert(loc=3, column="id", value=histone_tissue)
+    return giggle
+
+
+# make the table for all TE
+all_data = []
+for te in tqdm(tes):
+    files = [f for f in giggle_res if te in f]
+    znfs = [z.split("/")[3] for z in files]
+    all_df = []
+    for file in files:
+        all_df.append(read_giggle(file, te))
+    df = pd.concat(all_df)
+    if df.shape[0] == 0:
+        continue
+    histone = meta.reindex(df["id"])["Experiment target"].str.replace("-human", "")
+    tissue = meta.reindex(df["id"])["Biosample term name"]
+    df["Hmark"] = histone.values
+    df["tissue"] = tissue.values
+    df["Histone"] = df["Hmark"] + "_" + df["tissue"]
+    all_data.append(df)
+
+all_df = pd.concat(all_data)
+
+all_df.to_csv("../results/TE_x_ZNF_x_Histone_x_tissues.csv", index=False)
+
+################################################################################################################################################################################
+# python
+# 05 - bound/unbound 
+
+# singularity exec docker://registry.c4science.ch/lvg/pyenv:v3 ipython --no-autoindent
+
+import pandas as pd
+import numpy as np
+import os
+from tqdm import tqdm
+from glob import glob
+from os.path import basename
+import seaborn as sns
+from matplotlib import pyplot as plt
+import requests, json
+
+
+
+# Only TE TE bound by any ZNF, TE never bound
+giggle_res_TE = glob("../results/giggle_results_TEonly/*.tsv")
+
+all_dat = []
+for f in giggle_res_TE:
+    status = "neverbound" if "never" in f else "bound_anyZNF"
+    name = (
+        os.path.basename(f)
+        .replace("_never_bound_anyZNF-roadmap_giggle.tsv", "")
+        .replace("_bound_anyZNF-roadmap_giggle.tsv", "")
+    )
+    tmpdf = read_giggle(f, name + "_" + status)
+    all_dat.append(tmpdf)
+
+all_data = []
+for df in all_dat:
+    if len(df) == 0:
+        continue
+    histone = meta.reindex(df["id"])["Experiment target"].str.replace("-human", "")
+    tissue = meta.reindex(df["id"])["Biosample term name"]
+    df["Hmark"] = histone.values
+    df["tissue"] = tissue.values
+    df["Histone"] = df["Hmark"] + "_" + df["tissue"]
+    all_data.append(df)
+all_df = pd.concat(all_data)
+
+all_df.to_csv("../results/TE_bound_notbound_x_Histone_x_tissues.csv", index=False)
+
+
+#################################################################################################################################################################################
+# R
+# 06 - data processing for representation
+
+# define useful variables
+L2MIR <- as.factor(c('L2','L2a','L2b','L2c','L2d','L2d2',
+                     'MIR3','MIRb','MIRc','MIR'))
+
+# defining function to combine fisher stat later at odds-ratio summary
+# define fisher method function to use for combining p-values
+fisher_method <- function(p_values) {
+  chi_squared_stats <- -2 * log(p_values)
+  combined_statistic <- sum(chi_squared_stats)
+  combined_p_value <- pchisq(combined_statistic, df = 2 * length(p_values), lower.tail = FALSE)
+  return(combined_p_value)
+}
+
+# this is a table in supplementary that is the final output of giggle scoring [obtained in 03 of this section]
+m <- fread('C:/Users/dmilovan/Desktop/X/TE_x_ZNF_x_Histone_x_tissues.csv')
+
+# encode chip-s metadata of the data downloaded
+metadata <- fread('Y:/danica/2402_kzfp_encodeHistone/data/download/metadata.tsv')
+
+# in this manuscript, we focused only on tissue data
+metadata.tissue <- metadata[metadata$`Biosample type` == 'tissue',]
+levels(as.factor(metadata.tissue$`Biosample term name`))
+
+# subset final giggle table for only tissue derived data
+m.tissue <- m[m$tissue %in% metadata.tissue$`Biosample term name`,]
+
+# clean by taking only the relevant columns
+m.tissue.c <- m.tissue[,c(2,3,12,13,7,10,11)]
+levels(as.factor(m.tissue.c$tissue))
+
+# TE as an observation of interest 
+# take the mean of combo score accros specific comibnations; what it does is that it calculates the mean across different tissue replicates 
+# this one is to be used for dimension reduction as an  input
+    # mean cause there are more than one replicate of hmark-tissue per kzfp-te combination; so i take the mean of the composite enrichment score for a specific combination
+n <-  m.tissue.c %>%
+  group_by(TEsubFam, ZNF, Hmark, tissue) %>%
+  summarize(
+    combo_score = mean(combo_score)
+  )
+
+# this is the table used later for combining with umap coordinates for projection
+g <-  m.tissue.c %>%
+  group_by(TEsubFam, Hmark) %>%
+  summarise(mean_odds = mean(odds_ratio),
+            combo_fisher = fisher_method(fishers_right_tail),
+            mean_combo = mean(combo_score))
+g.c <- g
+# cap the p-value of the enrichment
+g.c$combo_fisher <- ifelse(g.c$combo_fisher == 0, 1e-300, g.c$combo_fisher)
+
+# running the umap for dim red
+# pivoting data so that my rows are different TEs and the combo score from the rest is filled out in the data frame wide format 
+n.w <- n %>% 
+  pivot_wider(names_from = c(ZNF, Hmark, tissue), values_from = combo_score, values_fill = 0) 
+# I am inflating data with zeroes, due to many combinations not being present, 
+# e.g kzfp-te pairs: ZNF700 doesn't sig bind Alu elements - ergo score 0
+# This is the 'drawback' of this approach leading to the data inflation with 0s, and adding to the umap bulk of TE subfams 
+# Though this supports the whole point of KZFP-based stratification, cause if the TE subfam is not often targeted by kzfps, it will behave like there are many 0s
+# the problem is if there is really refined TEsubfam-TE pair, which will be specific strong pair; the approach penalizes those individual 1-to-1 relationships
+# for me it wasn't an issue, because the point would be to look for global, systematic pairings
+# However, if the question is different, looking for more 1-to-1 relationships, the data should be dealt with in a different manner
+
+n.w.m <- as.matrix(n.w[,2:ncol(n.w)])
+rownames(n.w.m) <- n.w$TEsubFam
+
+# running the UMAP
+# different values were tested for n_neighbors, and 10 was selected
+res.te <- umap(n.w.m, n_neighbors = 10, metric = "euclidean") 
+  n.df <- data.frame(res.te$layout)
+  n.df.c <- data.frame(TEsubFam = rownames(n.df), n.df)
+
+nn <- merge(n.df.c, m.tissue.c, by = "TEsubFam", no.dups = F) 
+
+# summarize hmark enrichment across tissues for projecting onto the umap
+nn.hmark <- nn %>%
+  group_by(TEsubFam, X1, X2, Hmark) %>%
+  summarise(mean_odds = mean(odds_ratio),
+            combo_fisher = fisher_method(fishers_right_tail))
+
+hmark_list <- split(nn.hmark, nn.hmark$Hmark)
+nn.w.plot <- function(nn.hmark, hmark) {
+  ggplot(nn.hmark, aes(x = X1, y = X2, color = Hmark)) +
+    geom_point(aes(size = mean_odds, alpha = -log10(combo_fisher))) + 
+    # geom_point(data = , colour = "grey70")
+    facet_grid(.~Hmark, scales = 'free') +
+    labs(title = paste("UMAP Visualization of Data", unique(nn.hmark$Hmark)),
+         x = "UMAP Component 1",
+         y = "UMAP Component 2") +
+    guides(color = 'none') +
+    scale_alpha_continuous(range = c(0.1, max(nn.hmark$combo_fisher))) +
+    scale_size_continuous(name = "mean odds ratio") +
+    scale_color_manual(values = custom_colors) +
+    theme_classic() +
+    theme(aspect.ratio = 1)
+}
+
+
+# BACK TO INFO ABOUT TES IN GENERAL
+# taking the TEs file to label subfamilies on a family level - this is a standard Trono lab file for TE integrant coordinates in hg19, with additional TE classification info
+# the difference to dfam annotation is LTR merged with 'int' segmenets for full ERVs, as described in many previous Trono lab publications. e.g. de Tribolet-Hardy, et al. 2023
+te <- fread('U:/Team LVG/Danica/MY_DATA/LVG_data/resources/human/LVG/1811_hg19_TE_repmask_LTRm.bed') %>% 
+  setNames(c('chr','chrStart','chrEnd','sfam','score','strand','TEFam','TEsubFam')) %>%
+  dplyr::select(TEFam,TEsubFam)
+te.cc <- distinct(te)
+TEclass <- fread('U:/Team LVG/Danica/MY_DATA/LVG_data/resources/human/LVG/TEClasses.tsv')
+TEclass.c <- TEclass[,6:8]
+colnames(TEclass.c) <- c('class','TEFam','equiv')
+TEclass.c <- TEclass.c %>% 
+  mutate(TEFam = paste(class, TEFam, sep = "/"))
+te.ccc <- tidyr::separate(te.cc, col = TEFam, into = c("class", "fam"), sep = "/")
+View(te.ccc)
+te.z <- cbind(te.cc, te.ccc)
+
+# projected information of TEs: age, KZFP unbound/bound data
+# manually curated (DM and OR) age based on the dfam information
+UMAP4age = data.table::fread("1-DFAM_consensus/202407_TEsubFam_coord_age1_curated.txt")
+
+# merge with TEFam info
+nnn <- merge(n.df.c, g, by = "TEsubFam", all.x = TRUE, all.y = FALSE)
+nnn <- nnn %>%
+  mutate(class = case_when(class == "DNA?" ~ "DNA", 
+                           class == "LTR?" ~ "LTR",
+                           class == "RC?" ~ "RC",
+                           TRUE ~ class))
+nnn.full <- merge(nnn %>% 
+                    dplyr::select(TEsubFam, X1, X2, TEFam, class, fam, count),
+                  UMAP4age %>% dplyr::select(TEsubFam, age1.curated, is.age.curated), by = "TEsubFam")
+
+# enrichment for when the TE is bound vs. unbound by KZFPs
+k.binary <- fread('Y:/danica/2402_kzfp_encodeHistone/results/TE_bound_notbound_x_Histone_x_tissues.csv') # this file is obtained in 05 of this section
+k.b.tissue <- k.binary[k.binary$tissue %in% metadata.tissue$`Biosample term name`,]
+
+# clean by taking only the relevant columns
+k.b.tissue.c <- k.b.tissue[,c(2,12,13,7,10,11)]
+w <- k.b.tissue.c
+# Extract 'bound_anyZNF' or 'neverbound' to a new column 'status'
+w$status <- ifelse(grepl("bound_anyZNF", w$TEsubFam), "bound_anyZNF",
+                               ifelse(grepl("neverbound", w$TEsubFam), "neverbound", NA))
+w$TEsubFam <- sub("_bound_anyZNF|_neverbound", "", w$TEsubFam)
+
+# only take l2/mirs
+w.l2mir <- w[w$TEsubFam %in% L2MIR,]
+b <- w.l2mir %>% 
+  group_by(TEsubFam, Hmark, tissue, status) %>%
+  summarise(mean_odds = mean(odds_ratio),
+            combo_fisher = fisher_method(fishers_right_tail))
+b.c <- b[!is.na(b$mean_odds),]
+
+# bound vs unbound boxplot
+b.plot <- ggplot(b, aes(x = TEsubFam, y = mean_odds, fill = status)) +
+  geom_boxplot(position = position_dodge(width = 0.75)) +
+  # geom_point(position = position_dodge(width = 0.75), aes(group = status)) +
+  # geom_line(aes(group = interaction(TEsubFam, Hmark)), color = "grey", alpha = 0.075) + # lines don't work
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90), aspect.ratio = 1) +
+  scale_fill_manual(values = condition_colors) +
+  facet_wrap(.~Hmark) +
+  stat_compare_means(aes(group = status), label = "p.signif", method = "t.test", hide.ns = TRUE)
+
+
+
+
+
+
+
+
+
 
