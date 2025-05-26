@@ -1,0 +1,456 @@
+# R
+# 01 - L2/MIR KZFP binders
+
+kzfp.bs.me <- fread('Y:/danica/2402_kzfp_encodeHistone/results/pyTEnrich_res_noSCAN_allZNF.csv')
+c <- kzfp.bs.me
+c$kzfp <- gsub("^.*_(Z[A-Za-z0-9]+?)(HA)?(_|$).*", "\\1", c$ZNF)
+c$kzfp <- sub("_.*", "", c$kzfp)
+levels(as.factor(c$kzfp))
+c <- c[c$ZNF != 'TEnoKZNF',]
+c <- c[c$kzfp != 'AC115220',]
+
+c.capped <- c %>% 
+  mutate(padj.final = ifelse(padj.final == 0, 1e-300, padj.final))
+c.capped$log10.padj.final <- -log10(c.capped$padj.final)
+head(c.capped)
+c.capped %>% 
+  dplyr::filter(padj.final < 0.05) %>%
+  dplyr::select(subfam_name) %>% distinct() %>% nrow() # 779 sig enriched out of 1176 te subfam
+
+# te.z is table generated from fig 1, in supplementary data files te-z.csv
+te.z.c <- te.z[,1:3]
+colnames(te.z.c) <- c('TEFam','subfam_name','class')
+c.capped.c <- merge(c.capped, te.z.c, by = 'subfam_name', all.x = T, all.y = F, allow.cartesian = TRUE)
+head(c.capped.c)
+
+all <- c.capped.c %>%
+  dplyr::filter(padj.final < 0.05) %>%
+  dplyr::select(subfam_name, kzfp, class, TEFam) %>%
+  group_by(subfam_name, class, TEFam, kzfp) %>%
+  dplyr::count(kzfp) %>%
+  ungroup() %>%
+  dplyr::rename(count.all = n)
+
+# define primary target for all
+primary <- c.capped.c %>%
+  #dplyr::filter(significance != 'n.s') %>%
+  dplyr::select(kzfp, padj.final, subfam_name, class, TEFam) %>%
+  group_by(kzfp) %>%
+  dplyr::filter(padj.final == min(padj.final)) %>%
+  ungroup() %>% 
+  dplyr::filter(padj.final < 1) %>%
+  group_by(subfam_name, class, TEFam, kzfp) %>%
+  dplyr::count(kzfp) %>%
+  ungroup() %>%
+  dplyr::rename(count.primary = n)
+
+combined.l2mir <- full_join(all, primary, by = c("subfam_name", "kzfp", "class", "TEFam")) %>%
+  mutate(count.primary = replace_na(count.primary, 0)) %>%
+  dplyr::filter(subfam_name %in% L2MIR)
+View(combined.l2mir)
+
+# age of kzfps - this data is in more deteiled discussed in previous Trono lab publications, e.g. de Tribolet-hardy, et al. 2023
+kzfp.age <- fread('U:/Team LVG/Danica/MY_DATA/LVG_data/resources/human/LVG/KRAB_GRCh37-hg19_KRAB_age.csv')
+kzfp.age.c <- kzfp.age[,1:2]
+colnames(kzfp.age.c) <- c('kzfp','age')
+
+c.age <- left_join(c, kzfp.age.c, by = 'kzfp') 
+L2MIRbinders <- c.age[c.age$subfam_name %in% L2MIR,]
+L2MIRbinders.c <- L2MIRbinders[L2MIRbinders$padj.final < 0.05,] # sig for at least one subfam
+L2MIRbinders.ccc <- L2MIRbinders.cc[!is.na(L2MIRbinders.cc$age),]
+levels(as.factor(L2MIRbinders.ccc$kzfp)) 
+length(unique(L2MIRbinders.ccc$kzfp))# 23
+
+# limit to p-val to display as dot transparency
+L2MIRbinders.ccc <- L2MIRbinders.ccc %>%
+  mutate(padj.final = ifelse(padj.final == 0, 1e-300, padj.final))
+
+dotplot <- ggplot(L2MIRbinders.ccc, aes(x = subfam_name, y = reorder(kzfp, age))) + 
+  geom_point(aes(alpha = -log10(padj.final), size = fc.expected), color = 'darkcyan', position = position_dodge()) +
+  xlab('L2/MIR subfamily') +
+  ylab('KZFP') +
+  theme_bw() +
+  theme(axis.title = element_text(size = 20), axis.text = element_text(size = 15), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
+
+
+###################################################################################################################################################################################
+# R
+# 02 - dn/ds
+
+# for more detail on how dn/ds was computed check Matsushima, et al. 2025
+# here is visual representation for ZNF436 
+dnds.436 <- fread('U:/Team LVG/Danica/MY_DATA/LVG_data/Wayo/ZNF436_GeneID-80818_dnds_anno.xls')
+dnds.436$kzfp <- 'ZNF436'
+dnds.436$domains <- ifelse(grepl("^ZF", dnds.436$domains_uniprot), "ZF", dnds.436$domains_uniprot) # domains were curated based on uniprot domain anno
+dnds.436$beta.alpha <- dnds.436$beta/dnds.436$alpha
+
+dnds.436.plot <- dnds.436 %>%
+  ggplot() +
+  geom_jitter(aes(x = domains, y = beta/alpha, color = domains, alpha = -log10(`p-value`)), size = 3) +
+  geom_violin(aes(x = domains, y = beta/alpha)) +
+  theme_bw() +
+  geom_hline(yintercept = 1, linetype = "dashed", color = 'red') 
+
+###################################################################################################################################################################################
+# bash
+# 03 - pyTEnrich plotting of TE subfam enrichment for ZNF436 and Zfp46
+
+
+
+
+
+#################################################################################################################################################################################
+# R
+# 04 - human and mouse enrichment representation
+
+# HUMAN PEAKS
+L2M.hum.436.peaks = 
+  data.table::fread("U:/Team LVG/Danica/MY_DATA/LVG_data/Olga/ZNF436project/2-ChIP-seq/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80_AllTE.bed") %>%
+  stats::setNames(c("peak.chr", "peak.start", "peak.end","peak.ID", 
+                    "peak.score","TE.chr", "TE.start", "TE.end", "TE.ID", 
+                    "TE.score", "TE.strand", "TE.fam", "TE.sfam", "peak.overlap")) %>%
+  filter(TE.chr != ".") %>%
+  # Associate each ZNF436 peak to a single TE 
+  # = one with the highest overlap = number of overlapping base pairs
+  group_by(peak.ID) %>%
+  mutate(max.overlap = max(peak.overlap), 
+         is.max.overlap = ifelse(peak.overlap==max.overlap, "Yes", "No"))
+# in these results one peak can be associated to multiple TEs
+
+L2M.hum.436.peaks.filt = 
+  L2M.hum.436.peaks %>% 
+  dplyr::filter(is.max.overlap=="Yes") %>%
+  dplyr::select(peak.ID, TE.chr, TE.start, TE.end, 
+                TE.ID, TE.score, TE.strand, TE.fam, 
+                TE.sfam, peak.overlap) %>%
+  mutate(is.duplicated.peak = duplicated(peak.ID))  %>%
+  dplyr::filter(is.duplicated.peak == FALSE | 
+                  is.duplicated.peak == TRUE & grepl("L2b|L2c|MIRb",TE.fam)) %>% 
+  mutate(TE.fam.v2 = ifelse(grepl("Alu|MIR|L2|No\\.TE", TE.fam), 
+                            TE.fam, "Other.TE"))  
+nrow(L2M.hum.436.peaks.filt) # 3 216 
+# 3216 peaks are overlapping TEs, the rest not; 
+# combine with all
+All.hum.436peaks = 
+  data.table::fread("C:/Users/dmilovan/Documents/MY_DATA/DM_desk/human/2009_chipseq_PRJNA307573/beds/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80.bed") %>%
+  stats::setNames(c("peak.chr", "peak.start", "peak.end","peak.ID", "peak.score")) %>%
+  left_join(L2M.hum.436.peaks.filt, by="peak.ID") %>%
+  mutate_at(c("TE.ID", "TE.fam", "TE.sfam", "TE.fam.v2"),
+            function(x) replace_na(x, "No.TE"))
+nrow(All.hum.436peaks) # 3633
+
+# annotate the genomic features of 436 peaks
+txdb <- TxDb.Hsapiens.UCSC.hg19.knownGene
+annoDb = "org.Hs.eg.db"
+All.hum.436peaks.annot = 
+  All.hum.436peaks %>%
+  GenomicRanges::makeGRangesFromDataFrame(., 
+                                          keep.extra.columns=TRUE,
+                                          ignore.strand=TRUE,
+                                          seqinfo=NULL,
+                                          seqnames.field="peak.chr",
+                                          start.field="peak.start",
+                                          end.field="peak.end",
+                                          starts.in.df.are.0based=FALSE) %>%
+  ChIPseeker::annotatePeak(., annoDb=annoDb, TxDb = txdb, 
+                           tssRegion = c(-1000, 1000)) %>% # i define prom region as +/- 1kb around tss
+  as.data.frame(.) %>% 
+  mutate(annotation.v2 = 
+           ifelse(grepl("Intron", annotation), "Intron", 
+                  ifelse(grepl("3|5", annotation), "Exon", 
+                         ifelse(grepl("Exon", annotation), "Exon",
+                                ifelse(grepl("Downstream", annotation), "Distal Intergenic",
+                                       annotation))))) 
+
+# proportions and plots
+All.hum.436peaks.annot %>% 
+  dplyr::filter(TE.fam.v2 == "LINE/L2" | TE.fam.v2 == "SINE/MIR") %>%
+  dplyr::select(peak.ID, annotation.v2) %>% distinct() %>%
+  dplyr::count(annotation.v2) %>% 
+  mutate(sum = sum(n),
+         perc = n/sum*100) 
+# ADD THE PIE CHARTS
+All.hum.436peaks.annot %>% 
+  dplyr::filter(TE.fam.v2 == "LINE/L2" | TE.fam.v2 == "SINE/MIR") %>%
+  dplyr::select(peak.ID, annotation.v2) %>% distinct() %>%
+  dplyr::count(annotation.v2) %>% 
+  mutate(sum = sum(n),
+         perc = n/sum*100) %>%
+  ggplot(aes(x = "", y = perc, fill = annotation.v2)) +  # Empty string for x to make a pie chart
+  geom_bar(stat = "identity", width = 1) +  # Bar chart with equal width
+  coord_polar("y", start = 0) + 
+  geom_text(aes(label = n), position = position_stack(vjust = 0.5)) + 
+  theme_bw() +
+  theme(axis.text = element_blank(),  # Remove axis text
+        axis.ticks = element_blank(),  # Remove axis ticks
+        panel.grid = element_blank(),  # Remove grid lines
+        aspect.ratio = 1)
+
+################
+# MOUSE PEAKS
+L2M.mm9 = 
+  data.table::fread("U:/Team LVG/Danica/MY_DATA/LVG_data/Olga/ZNF436project/2-ChIP-seq/Zfp46.good_vs_F9_Input.good_peaks_macs80_mm9_TEs_zfp46-bound.bed") %>%
+  stats::setNames(c("TE.chr", "TE.start", "TE.end", "TE.sfam", 
+                    "TE.score", "TE.strand", "TE.fam",
+                    "peak.chr", "peak.start", "peak.end",
+                    "peak.ID", "peak.score", "peak.overlap")) %>%
+  group_by(peak.ID) %>%
+  mutate(max.overlap = max(peak.overlap), 
+         is.max.overlap = ifelse(peak.overlap==max.overlap, 
+                                 "Yes", "No")) %>%
+  ungroup() %>% as.data.frame()
+nrow(L2M.mm9) # 1 326
+
+L2M.mm9.filt = 
+  L2M.mm9 %>% 
+  dplyr::filter(is.max.overlap=="Yes") %>%
+  dplyr::select(peak.ID, TE.chr, TE.start, TE.end, 
+                TE.score, TE.strand, TE.fam, TE.sfam, peak.overlap) %>%
+  mutate(is.duplicated.peak = duplicated(peak.ID)) %>%
+  dplyr::filter(is.duplicated.peak == FALSE | is.duplicated.peak == TRUE & TE.fam %in% c("MIR", "L2b"))
+
+nrow(L2M.mm9.filt) # 733 overlapping TEs
+View(L2M.mm9.filt)
+
+All.mus.46peaks = 
+  data.table::fread("U:/Team LVG/Danica/MY_DATA/LVG_data/Olga/ZNF436project/2-ChIP-seq/Zfp46.good_vs_F9_Input.good_peaks_macs80.bed") %>%
+  stats::setNames(c("peak.chr", "peak.start", "peak.end",
+                    "peak.ID", "peak.score")) %>%
+  left_join(L2M.mm9.filt, by="peak.ID") %>%
+  mutate(TE.fam = replace_na(TE.fam, "No.TE"),
+         TE.sfam= replace_na(TE.sfam, "No.TE")) %>%
+  mutate(TE.fam.v2 = ifelse(grepl("B2|B4", TE.fam), "Rod.SINE", TE.fam)) %>%
+  mutate(TE.fam.v2 = ifelse(grepl("Alu|MIR|L2|Rod.SINE|No\\.TE", TE.fam.v2), 
+                            TE.fam.v2, "Other.TE"))
+nrow(All.mus.46peaks) # 1 585 - this is the number of peaks
+View(All.mus.46peaks)
+
+TxDbmm9 <- TxDb.Mmusculus.UCSC.mm9.knownGene
+annodbmm9 <- "org.Mm.eg.db"
+All.mus.46peaks.annot = 
+  All.mus.46peaks %>%
+  GenomicRanges::makeGRangesFromDataFrame(., 
+                                          keep.extra.columns=TRUE,
+                                          ignore.strand=TRUE,
+                                          seqinfo=NULL,
+                                          seqnames.field="peak.chr",
+                                          start.field="peak.start",
+                                          end.field="peak.end",
+                                          starts.in.df.are.0based=FALSE) %>%
+  ChIPseeker::annotatePeak(., 
+                           annoDb=annodbmm9, 
+                           TxDb = TxDbmm9, 
+                           tssRegion = c(-1000, 1000)) %>%
+  as.data.frame(.) %>%
+  mutate(annotation.v2 = 
+           ifelse(grepl("Intron", annotation), "Intron", 
+                  ifelse(grepl("3|5", annotation), "Exon", 
+                         ifelse(grepl("Exon", annotation), "Exon",
+                                ifelse(grepl("Downstream", annotation), "Distal Intergenic",
+                                       annotation)))))
+nrow(All.mus.46peaks.annot) # 1 585
+head(All.mus.46peaks.annot, 10)
+View(All.mus.46peaks.annot)
+levels(as.factor(All.mus.46peaks.annot$annotation.v2))
+
+
+# subset only for the peaks associating with L2/MIRs
+All.mus.46peaks.annot %>% 
+  dplyr::filter(TE.fam.v2 == "LINE/L2" | TE.fam.v2 == "SINE/MIR") %>%
+  dplyr::select(peak.ID, annotation.v2) %>% distinct() %>%
+  dplyr::count(annotation.v2) %>% 
+  mutate(sum = sum(n),
+         perc = n/sum*100) 
+
+All.mus.46peaks.annot %>% 
+  dplyr::filter(TE.fam.v2 == "LINE/L2" | TE.fam.v2 == "SINE/MIR") %>%
+  dplyr::select(peak.ID, annotation.v2) %>% distinct() %>%
+  dplyr::count(annotation.v2) %>% 
+  mutate(sum = sum(n),
+         perc = n/sum*100) %>%
+  ggplot(aes(x = "", y = perc, fill = annotation.v2)) +  # Empty string for x to make a pie chart
+  geom_bar(stat = "identity", width = 1) +  # Bar chart with equal width
+  coord_polar("y", start = 0) + 
+  geom_text(aes(label = n), position = position_stack(vjust = 0.5)) + 
+  theme_bw() +
+  theme(axis.text = element_blank(),  # Remove axis text
+        axis.ticks = element_blank(),  # Remove axis ticks
+        panel.grid = element_blank(),  # Remove grid lines
+        aspect.ratio = 1)
+
+################################################################################################################################################################################
+# R 
+# 05 -secondary targets
+
+# HUMAN
+All.hum.sec.target <- fread('F:/bioinfo/2009_ZNF436chip/hg19_TEs__ZNF436macs80.bed')
+head(All.hum.sec.target)
+colnames(All.hum.sec.target) <- c("TE.chr","TE.start","TE.end","TE.sfam","TE.score","TE.strand","TE.fam","TE",
+                  "peak.chr","peak.start","peak.end","peak.ID","peak.score","overlap")
+All.hum.sec.target <- All.hum.sec.target %>%
+  group_by(peak.ID) %>%
+  mutate(max.overlap = max(overlap), 
+         is.max.overlap = ifelse(overlap==max.overlap, 
+                                 "Yes", "No")) %>%
+  ungroup() %>% as.data.frame()
+
+All.hum.sec.target.filt = 
+  All.hum.sec.target %>% 
+  dplyr::filter(is.max.overlap=="Yes") %>%
+  dplyr::select(peak.ID, TE.chr, TE.start, TE.end, 
+                TE.score, TE.strand, TE.fam, TE.sfam, overlap) %>%
+  mutate(is.duplicated.peak = duplicated(peak.ID)) %>%
+  dplyr::filter(is.duplicated.peak == FALSE | is.duplicated.peak == TRUE & TE.fam %in% c("MIR", "L2b")) # this part what is it for?
+  
+All.hum.436peaks = 
+  data.table::fread("C:/Users/dmilovan/Documents/MY_DATA/DM_desk/human/2009_chipseq_PRJNA307573/beds/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80.bed") %>%
+  stats::setNames(c("peak.chr", "peak.start", "peak.end","peak.ID", "peak.score")) %>%
+  left_join(All.hum.sec.target.filt, by="peak.ID") %>%
+  mutate(TE.fam = replace_na(TE.fam, "No.TE"),
+         TE.sfam = replace_na(TE.sfam, "No.TE")) %>%
+  mutate(TE.fam.v2 = ifelse(grepl("Alu|MIR|L2|No\\.TE", TE.fam), 
+                            TE.fam, "Other.TE"))
+nrow(All.hum.436peaks) # 3633 
+
+All.hum.secTarget =
+  All.hum.sec.target %>% 
+  dplyr::filter(is.max.overlap=="No") %>%
+  group_by(peak.ID) %>%
+  mutate(Secondary.target = paste0(TE.fam, collapse = "")) %>% 
+  dplyr::select(peak.ID, Secondary.target) %>% unique()
+nrow(All.hum.secTarget) # 358
+length(unique(All.hum.secTarget$peak.ID))
+
+All.hum.436peaks.annot.2ndary.target = 
+  All.hum.436peaks.annot %>% 
+  mutate(TE.fam.v2 = ifelse(grepl("Alu|MIR|L2|No\\.TE", TE.fam), 
+                            TE.fam, "Other.TE")) %>% 
+  left_join(All.hum.secTarget, by ="peak.ID") %>%
+  mutate(
+    Secondary.target = ifelse(is.na(Secondary.target) & TE.fam =="No.TE", "No.TE",
+                              ifelse(is.na(Secondary.target) & TE.fam !="No.TE",
+                                     "No.TE", Secondary.target)),
+    Secondary.target.v2 = ifelse(grepl("No\\.TE|secondary", Secondary.target),
+                                 Secondary.target,
+                                 ifelse(grepl("L2", Secondary.target), "L2", 
+                                        ifelse(grepl("MIR", Secondary.target), "MIR", 
+                                               ifelse(grepl("Alu", Secondary.target), "Alu",
+                                                      "Other.TE")))))
+
+# get the info of the number of peaks looked at for a secondary target
+All.hum.436peaks.annot.2ndary.target %>% 
+  count(TE.fam) %>% 
+  mutate(sum = sum(n),
+         perc = n/sum*100) %>% 
+  arrange(-n)
+
+# alluvial
+All.hum436.sec.target.plot <- All.hum.436peaks.annot.2ndary.target %>%
+  dplyr::filter(TE.fam.v2 %in% c("Other.TE", "SINE/Alu")) %>%
+  count(TE.fam.v2, Secondary.target.v2) %>%
+  complete(TE.fam.v2, Secondary.target.v2, 
+           fill = list(n = 0)) %>%
+  ggplot(aes(axis1 = forcats::fct_relevel(TE.fam.v2, "Other.TE", "SINE/Alu"), 
+             axis2 = Secondary.target.v2,
+             y = n)) +
+  scale_x_discrete(limits = c("Primary", "Secondary")) +
+  xlab("") +
+  geom_alluvium(aes(fill = TE.fam.v2)) +
+  geom_stratum() +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum))) +
+  White_bg + theme(aspect.ratio=1)
+pdf('U:/Team LVG/Danica/MY_DATA/DM_desk/human/2009_chipseq_PRJNA307573/enrichment/202411_ZNF436_sec-target-alluvial.pdf')
+All.hum436.sec.target.plot
+dev.off()
+
+# proportions for the 2ndary targets and overlap w genomic features
+All.hum.436peaks.annot.2ndary.target %>%
+  dplyr::select(peak.ID, annotation.v2, TE.fam.v2, Secondary.target.v2) %>% distinct() %>%
+  mutate(TE.fam.v3 = case_when(TE.fam.v2 == "LINE/L2" ~ "LINE/L2",
+                               Secondary.target.v2 == "L2" ~ "LINE/L2",
+                               TE.fam.v2 == "SINE/MIR" ~ "SINE/MIR",
+                               Secondary.target.v2 == "MIR" ~ "SINE/MIR",
+                               TRUE ~ "other")) %>% 
+  dplyr::filter(TE.fam.v3 != "other") %>% 
+  dplyr::count(annotation.v2) %>% 
+  mutate(sum = sum(n),
+         perc = n/sum*100) %>%
+  ggplot(aes(x = "", y = perc, fill = annotation.v2)) +  # Empty string for x to make a pie chart
+  geom_bar(stat = "identity", width = 1) +  # Bar chart with equal width
+  coord_polar("y", start = 0) + 
+  geom_text(aes(label = n), position = position_stack(vjust = 0.5)) + 
+  theme_bw() +
+  theme(axis.text = element_blank(),  # Remove axis text
+        axis.ticks = element_blank(),  # Remove axis ticks
+        panel.grid = element_blank(),  # Remove grid lines
+        aspect.ratio = 1)
+
+# MOUSE
+# specific mouse subfamilies are manually curated as Rod.SINE in the publication, after checking the clade-specificity of a TE subfam on Dfam
+L2M.mm9.secTarget =
+  L2M.mm9 %>% 
+  dplyr::filter(is.max.overlap=="No") %>%
+  group_by(peak.ID) %>%
+  mutate(Secondary.target = paste0(TE.fam, collapse = "")) %>% 
+  dplyr::select(peak.ID, Secondary.target) %>% unique()
+View(L2M.mm9.secTarget)
+nrow(L2M.mm9.secTarget) # 358
+length(unique(L2M.mm9.secTarget$peak.ID)) # 358
+
+All.mus.46peaks.annot.2ndary.target = 
+  All.mus.46peaks.annot %>% 
+  mutate(TE.fam.v2 = ifelse(grepl("Alu|MIR|L2|No\\.TE", TE.fam), 
+                            TE.fam, "Other.TE")) %>% 
+  left_join(L2M.mm9.secTarget, by ="peak.ID") %>%
+  mutate(
+    Secondary.target = ifelse(is.na(Secondary.target) & TE.fam =="No.TE", "No.TE",
+                              ifelse(is.na(Secondary.target) & TE.fam !="No.TE",
+                                     "No.TE", Secondary.target)),
+    Secondary.target.v2 = ifelse(grepl("No\\.TE|secondary", Secondary.target),
+                                 Secondary.target,
+                                 ifelse(grepl("L2", Secondary.target), "L2", 
+                                        ifelse(grepl("MIR", Secondary.target), "MIR", 
+                                               ifelse(grepl("Alu", Secondary.target), "Alu",
+                                                      "Other.TE")))))
+# alluvial plot pf the 2ndary targets
+All.mus.46peaks.annot.2ndary.target %>%
+  dplyr::filter(TE.fam.v2 %in% c("Other.TE", "SINE/Alu")) %>%
+  count(TE.fam.v2, Secondary.target.v2) %>%
+  complete(TE.fam.v2, Secondary.target.v2, 
+           fill = list(n = 0)) %>%
+  ggplot(aes(axis1 = forcats::fct_relevel(TE.fam.v2, "Other.TE", "SINE/Alu"), 
+             axis2 = Secondary.target.v2,
+             y = n)) +
+  scale_x_discrete(limits = c("Primary", "Secondary")) +
+  xlab("") +
+  geom_alluvium(aes(fill = TE.fam.v2)) +
+  geom_stratum() +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum))) +
+  White_bg + theme(aspect.ratio=1)
+
+# proportions of peaks with secondary targets being l2mirs
+All.mus.46peaks.annot.2ndary.target %>%
+  dplyr::select(peak.ID, annotation.v2, TE.fam.v2, Secondary.target.v2) %>% distinct() %>%
+  mutate(TE.fam.v3 = case_when(TE.fam.v2 == "LINE/L2" ~ "LINE/L2",
+                               Secondary.target.v2 == "L2" ~ "LINE/L2",
+                               TE.fam.v2 == "SINE/MIR" ~ "SINE/MIR",
+                               Secondary.target.v2 == "MIR" ~ "SINE/MIR",
+                               TRUE ~ "other")) %>% 
+  dplyr::filter(TE.fam.v3 != "other") %>% 
+  dplyr::count(annotation.v2) %>% 
+  mutate(sum = sum(n),
+         perc = n/sum*100) %>%
+  ggplot(aes(x = "", y = perc, fill = annotation.v2)) +  # Empty string for x to make a pie chart
+  geom_bar(stat = "identity", width = 1) +  # Bar chart with equal width
+  coord_polar("y", start = 0) + 
+  geom_text(aes(label = n), position = position_stack(vjust = 0.5)) + 
+  theme_bw() +
+  theme(axis.text = element_blank(),  # Remove axis text
+        axis.ticks = element_blank(),  # Remove axis ticks
+        panel.grid = element_blank(),  # Remove grid lines
+        aspect.ratio = 1)
+
+
+
+
+
