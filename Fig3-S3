@@ -60,6 +60,60 @@ CT.Exp %>%
   guides(fill="none") + theme(aspect.ratio=4) 
 
 # human heart dev - bulk RNA-seq Cardoso-Moreira, et al. 2019
+h <- as.data.frame(fread('U:/Team LVG/Danica/MY_DATA/DM_desk/evo/2019_CardosoMoreiraM_dev/Human.CPM.txt'))
+# subsetting for organ-spec data
+h.ensembl <- as.data.frame(h$V1)
+h.heart <- cbind(h.ensembl, h[,grepl("Heart", names(h))])
+
+# HEART
+# calculating the mean expression data for the replicated stages for each organ
+print(colnames(h.heart))
+h.h.wordsToMatch <- c('4wpc','5wpc','6wpc','7wpc','8wpc','9wpc','10wpc','11wpc','12wpc','13wpc','16wpc','18wpc','19wpc','newborn','infant','toddler','teenager','youngAdult','olderMidAge')
+mean.h.heart <- as.data.frame(h.heart$`h$V1`)
+colnames(mean.h.heart) <- 'ensembl.h'
+for (word in h.h.wordsToMatch) {
+  matchingColumns <- grepl(word, colnames(h.heart))
+  mean.h.heart[, paste0("Mean_", word)] <- rowMeans(as.matrix(h.heart[, matchingColumns]))
+}
+mean.h.heart <- as.data.frame(mean.h.heart)
+
+# Z-scoring human expression
+h.h <- as.matrix(as.data.frame(mean.h.heart[,2:ncol(mean.h.heart)]))
+rownames(h.h) <- mean.h.heart$ensembl.h
+z.h.h <- matrix(0, nrow(h.h), ncol(h.h)) 
+View(z.k.h)
+for (i in 1:nrow(h.h)) {
+  for (j in 1:ncol(h.h)) {
+    z.h.h[i,j] <- (h.h[i,j] - rowMeans(h.h[i,, drop = FALSE]))/ rowSds(h.h[i,,drop = FALSE])
+  }  
+} 
+# z table is a matrix with z-score normalized gene expression of all genes
+rownames(z.h.h) <- rownames(h.h)
+colnames(z.h.h) <- colnames(h.h)
+
+duplicated_rows <- duplicated(z.h.h) | duplicated(z.h.h, fromLast = TRUE)
+z.h.h.c <- z.h.h[!duplicated_rows,]
+
+# melting expression data for line plot
+View(h.hh)
+l <- as.data.frame(h.h) 
+l$ensembl <- rownames(l)
+l <- melt(l)
+
+# pick example genes
+genes <- as.factor(c('ENSG00000125945', # ZNF436
+                     'ENSG00000159173',  # TNNI1
+                     'ENSG00000164532', #TBX20
+                     'ENSG00000141448' # GATA6
+                     ))
+l.genes <- l[l$ensembl %in% genes,]
+l.p <- ggplot(l.genes, aes(x = variable, y = value, group = ensembl)) +
+    geom_line(size = 0.7) +
+    # scale_color_manual(values = l.genes$ensembl) +
+    theme(axis.text.x = element_text(angle = 90)) +
+    xlab('developmental stage') +
+    ylab('CPM')
+
 
 # data is from PRJNA480492 cardiac diff expression CPM
 hum.RNAseq.CM = 
@@ -103,59 +157,209 @@ hum.RNAseq.CM %>%
              scales="free") + 
   theme_bw() + theme(aspect.ratio=0.8)
 
+################################################################################################################################################################################
+# R
+# 02 - Count table processing from RNA-seq
+
+#singularity run docker://registry.c4science.ch/lvg/r-4.2.1:v2
+
+###################################################
+### global vars and load libs
+###################################################
+
+pwd <- unlist(strsplit(sub(".*projects/", "", getwd()), "/"))
+who <- pwd[1]; project <- pwd[2]
+server <- c('fidis', 'helvetios', 'alfred')[3]
+org <- c('Hs', 'Mm', 'Mmu', 'Dr')[1]
+mc.cores <- 4
+make.design <- c('auto', 'onlyGroup', 'dummy')[1]
+library(colorout)
+source('~/scripts/R/common/commonFuns.R') # this code is LVG go to code; for details, see other Trono lab publications, such as 
+
+###################################################
+### create dirs, import and preprocess
+###################################################
+
+buildDirs()
+if (server=='alfred') {
+    getQClocal(hero, who, project)
+    path <- paste0('/home/', hero, '/scratch/', who, '/', project, '/pileup')
+    getCntsFromLocal(path)
+    if (!file.exists('../data/sampleinfo.csv')) makeSampleInfo(path=path)
+} else {
+    getQCfromHPC(hero, who, project, server)
+    getCntsFromHPC(hero, who, project, server) ## can use this if files are not on a server: getCntsFromLocal(path='../data/pileup')
+    if (!file.exists('../data/sampleinfo.csv')) makeSampleInfo(hero, who, project, server)
+}
+preprocessCntsGene(make.design=make.design, org=org, annoWithBiomart=FALSE)
+if (length(unique((getSeqLengths())))!=1) stop('The sequence length is not the same across all samples!')
+
+###################################################
+### plots after batch correction in each group
+###################################################
+
+load('../data/RData/countTable_gene.RData')
+load('../data/RData/genes.libSize.RData')
+Time <- as.factor(sinfo$Time)
+Time <- factor(Time, levels=c('t0', 't8', 't15'))
+mydircreate('../results/gene/figs/ManualAdj')
+
+#adjust
+design <- model.matrix(~ -1 + Group + Time + Batch + Group * Batch)
+fit1 <- lmFit(v, design)
+idx <- grepl('Batch', colnames(design))
+subs <- coef(fit1)[, idx, drop=F] %*% t(design[, idx, drop=F])  
+norm.counts.adj <- norm.counts - subs
+
+#export table
+norm_vals <- 2^(norm.counts.adj)*genes.avg.norm
+norm_vals[countTable==0] <- 0
+anno <- annotateEns(rownames(norm.counts), org, level='gene')
+xout_vals <- data.frame(anno, norm_vals)
+write.table(xout_vals, file='../results/gene/tables/norm_vals_adj.xls', row.names=F,
+            col.names=T, quote=F, sep='\t')
+
+
+###################################################
+### diffExp
+###################################################
+
+# in wt compare respect to previous time #
+##########################################
+
+dummy <- load('../data/RData/countTable_gene.RData')
+load('../data/RData/genes.libSize.RData')
+Time <- as.factor(sinfo$Time)
+Time <- factor(Time, levels=c('t0', 't8', 't15'))
+
+#select wt
+selc <- Group=='wt'
+countTable <- countTable[, selc]
+norm.counts <- norm.counts[, selc]
+norm.counts.adj <- norm.counts.adj[, selc]
+v <- v[, selc]
+#Group <- as.factor(Group[selc])
+Batch <- Batch[selc]
+sinfo <- sinfo[selc, ]
+Group <- Time[selc]
+
+##run contrasts
+contrast <- list(c('t15', 't8'), c('t8', 't0')) 
+for (i in 1:length(contrast)) {
+    cat(paste('\nContrast ', i, ': ', paste(unlist(contrast[i]), collapse=' vs '), '\n', sep=''))
+    compDiffExp(countTable=countTable, norm.counts=norm.counts, norm.counts.adj=norm.counts.adj,
+                Group=Group, Batch=Batch, v=v, genes.avg.norm=genes.avg.norm, contrast=contrast[[i]],
+                pval.threshold=.05, fc.threshold=2, path.out='../results/gene/tables_wtSamples', org=org, padj=F)
+}
+DEsummary(file='../results/gene/tables_wtSamples/summary_DE.txt', DE.path='../results/gene/tables_wtSamples')
+#geneOntology(DE.path='../results/gene/tables/', org=org)
+## gsea(DE.path='../results/gene/tables/', B=10000, org=org, mc.cores=1)
+#\end{rbatch}
+
+# in empty compare respect to previous time #
+#############################################
+
+dummy <- load('../data/RData/countTable_gene.RData')
+load('../data/RData/genes.libSize.RData')
+Time <- as.factor(sinfo$Time)
+Time <- factor(Time, levels=c('t0', 't8', 't15'))
+
+#select empty
+selc <- Group=='empty'
+countTable <- countTable[, selc]
+norm.counts <- norm.counts[, selc]
+norm.counts.adj <- norm.counts.adj[, selc]
+v <- v[, selc]
+#Group <- as.factor(Group[selc])
+Batch <- Batch[selc]
+sinfo <- sinfo[selc, ]
+Group <- Time[selc]
+
+##run contrasts
+contrast <- list(c('t15', 't8'), c('t8', 't0')) 
+for (i in 1:length(contrast)) {
+    cat(paste('\nContrast ', i, ': ', paste(unlist(contrast[i]), collapse=' vs '), '\n', sep=''))
+    compDiffExp(countTable=countTable, norm.counts=norm.counts, norm.counts.adj=norm.counts.adj,
+                Group=Group, Batch=Batch, v=v, genes.avg.norm=genes.avg.norm, contrast=contrast[[i]],
+                pval.threshold=.05, fc.threshold=2, path.out='../results/gene/tables_emptySamples', org=org, padj=F)
+}
+DEsummary(file='../results/gene/tables_emptySamples/summary_DE.txt', DE.path='../results/gene/tables_emptySamples')
+#geneOntology(DE.path='../results/gene/tables/', org=org)
+## gsea(DE.path='../results/gene/tables/', B=10000, org=org, mc.cores=1)
+#\end{rbatch}
+
+# in each timepoint compare groups #
+####################################
+
+#load
+dummy <- load('../data/RData/countTable_gene.RData')
+load('../data/RData/genes.libSize.RData')
+Time <- as.factor(sinfo$Time)
+Time <- factor(Time, levels=c('t0', 't8', 't15'))
+
+#model it all
+design <- model.matrix(~ -1 + Group + Time + Batch + Group * Time + Group * Batch)
+fit1 <- lmFit(v, design)
+#labels               1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15
+contrasts <- cbind(c( 1, 0,-1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), #t0. empty vs wt
+                   c( 1, 0,-1, 0, 0, 0, 0, 0,-1, 0, 0, 0, 0, 0, 0), #t8. empty vs wt
+                   c( 1, 0,-1, 0, 0, 0, 0, 0, 0, 0,-1, 0, 0, 0, 0), #t15. empty vs wt
+                   c( 0, 1,-1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), #t0. g9 vs wt
+                   c( 0, 1,-1, 0, 0, 0, 0, 1,-1, 0, 0, 0, 0, 0, 0), #t8. g9 vs wt
+                   c( 0, 1,-1, 0, 0, 0, 0, 0, 0, 1,-1, 0, 0, 0, 0), #t15. g9 vs wt
+                   c(-1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), #t0. g9 vs empty
+                   c(-1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0), #t8. g9 vs empty
+                   c(-1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0)) #t15. g9 vs empty
+fit2 <- contrasts.fit(fit1, contrasts)
+fit3 <- eBayes(fit2, trend=T)
+anno <- annotateEns(rownames(norm.counts), org, level='gene')
+
+#build ouput
+foldChange <- eb.fold(fit3)[, seq(1, ncol(contrasts) *3, by=3)]
+contrasts.p <- ifelse(contrasts!=1, 0, 1)
+contrasts.n <- ifelse(contrasts!=(-1), 0, 1)
+mean1 <- 2^(coef(fit1) %*% contrasts.p) * genes.avg.norm
+mean2 <- 2^(coef(fit1) %*% contrasts.n) * genes.avg.norm
+pvalue <- fit3$p.value
+padj <- apply(pvalue, 2, function(x) p.adjust(x, 'BH'))
+
+#export tables
+names1 <- paste0('mean.', rep(c('t0', 't8', 't15'), times=3), '.', rep(c('empty', 'g9', 'g9'), each=3))
+names2 <- paste0('mean.', rep(c('t0', 't8', 't15'), times=3), '.', rep(c('wt', 'wt', 'empty'), each=3))
+
+for (i in 1:ncol(contrasts)) {
+    xout <- data.frame(anno, mean1[, i], mean2[, i], foldChange=foldChange[, i], pval=pvalue[, i], padj=padj[, i])
+    colnames(xout)[5] <- names1[i]
+    colnames(xout)[6] <- names2[i]
+    xout$diffExpr <- ifelse(abs(xout$foldChange)>2 & xout$pval<.05, 'Yes', 'No')
+    xout <- xout[order(xout$pval), ]
+    file <- paste0('../results/gene/tables/DE_', gsub('mean.', '', names1[i]), '_vs_', gsub('mean.', '', names2[i]), '.xls')
+    write.table(xout, file=file, row.names=F, col.names=T, quote=F, sep='\t')
+}
 
 ################################################################################################################################################################################
 # R
 # 03 - my experiment
 
-# defining genes for given categories:
-TF.cmDiff.markers <- c('TBX5','GATA4','MEF2C','TNNT2')
-pick2 <- c("CD7","THEMIS2")
-structural.PPI = c("MYL2", "MYH11", "MYL3", "MYL4", "MYH7B", "MYO18B", 
-                   "ACTC1", "MYH6", "MYH7", "TNNI1", "TMOD1", "TNNC1", 
-                   "TCAP", "TTN", "ACTN2", "DES")
+# var
+condition_colors <- c("g9" = "purple4", "e" = "gray")
 
-
-# table cpm 
+# # table cpm 
 cpm <- fread('C:/Users/dmilovan/Desktop/data/CM_kd/CPM.xls')
-# cpm <- fread('Y:/danica/2303_rnaseq_timcourse_znf436_kd/results/gene/tables/CPM.xls')
-# cpm <- read.csv('Y:/danica/2303_rnaseq_timcourse_znf436_kd/results/gene/tables/CPM.xls', header = TRUE, sep = '\t')
-View(cpm)
 colnames(cpm) <- c('ensembl','entrez','symbol','genename','D0_e_r1','D0_e_r2','D0_e_r3','D0_g9_r1','D0_g9_r2','D0_g9_r3',
                    'D0_wt_r1','D0_wt_r2','D0_wt_r3','D15_e_r1','D15_e_r2','D15_e_r3','D15_g9_r1','D15_g9_r2','D15_g9_r3',
                    'D15_wt_r1','D15_wt_r2','D15_wt_r3','D8_e_r1','D8_e_r2','D8_e_r3','D8_g9_r1','D8_g9_r2','D8_g9_r3',
                    'D8_wt_r1','D8_wt_r2','D8_wt_r3')
-View(cpm)
-nrow(cpm) # nrow = 25822
-
 # getting the wt out of the further data analysis
-# picking some marker genes to look at
 cpm.c <- cpm[,-c(11:13,29:31,20:22)]
-
-# picking example genes
-
-# check for the succsess of differentiation
-pick <- TF.cmDiff.markers
-c.m.test <- cpm.c[cpm.c$symbol %in% pick2,] # symbol.example is from the last coaccess 
-View(c.m.test) 
-
+pick <- c('ZNF436',"CD7","THEMIS2")
+c.m.test <- cpm.c[cpm.c$symbol %in% pick,] 
 t.m <- c.m.test %>% 
   pivot_longer(cols = c(5:ncol(c.m.test)), values_to = c("cpm"),names_to = c("day","condition", "replicate"), names_sep  = "_") %>%
   group_by(symbol, day, condition) 
-View(t.m)
-head(t.m)
 t.p <- t.m %>% 
   summarise(n = n(), mean = mean(cpm), se = sd(cpm)/sqrt(3))
-View(t.p)
-
-# factor the x axis order
 t.p$day <- factor(t.p$day,levels = c("D0", "D8", "D15"))
-# plot the expression
-
-# param for plotting 
-condition_colors <- c("g9" = "purple4", "e" = "gray")
-head(t.p)
-View(t.p)
 genes <- t.p %>% 
   # dplyr::filter(day == 'D15') %>%
   ggplot(aes(x = day, y = mean, fill = condition, group = condition)) +
@@ -166,18 +370,18 @@ genes <- t.p %>%
   theme_bw() +
   theme(aspect.ratio = 1) +
   scale_fill_manual(values = condition_colors)
-genes
-ggsave('C:/Users/dmilovan/Desktop/data/CM_kd/plots/202504_CD7-THEMIS2_barplots.pdf')
 
-###############################################
-# differential gene expression data
+# defining genes for given categories:
+# These would be used as symbols to label
+TF.cmDiff.markers <- c('TBX5','GATA4','MEF2C','TNNT2')
+pick2 <- c("CD7","THEMIS2")
+structural.PPI = c("MYL2", "MYH11", "MYL3", "MYL4", "MYH7B", "MYO18B", 
+                   "ACTC1", "MYH6", "MYH7", "TNNI1", "TMOD1", "TNNC1", 
+                   "TCAP", "TTN", "ACTN2", "DES")
+symbolsToLabel
+
 # DIFFERENTIAL GENE EXPRESSION
-
-# I an using pval downstream, not padj, since with padj there is no gene deregulated, which is strange
-
 de.15 <- fread('C:/Users/dmilovan/Documents/MY_DATA/DM_desk/human/2303_rnaseq_timcourse_znf436_kd/results/gene/tables/DE_t15.g9_vs_t15.empty.xls')
-
-
 de.15 <- de.15 %>% mutate(gene_type = case_when(   
   foldChange >= 2 & pval <= 0.05 ~ "up", # change it to pval if padj doesn't work, just to get an idea on the gene expression trend
   foldChange <= -2 & pval <= 0.05 ~ "down",
@@ -196,64 +400,8 @@ de.15.volplot <- ggplot(de.15, aes(x = sign(foldChange)*log2(abs(foldChange)), y
   theme_bw() +
   theme(aspect.ratio = 1, axis.title = element_text(size = 20)) 
 
-de <- merge(merge(de.0, de.8, by = 'ensembl'), de.15, by = 'ensembl')
-View(de)
-
-de <- de[,-c(12,13,14,22,23,24)]
-nrow(de)
-colnames(de) <- c('ensembl','entrez','symbol','genename','D0_g9_mean','D0_e_mean','D0_fc','D0_pval','D0_padj','D0_diffExpr','D0_dirChange',
-                  'D8_g9','D8_e','D8_fc','D8_pval','D8_padj','D8_diffExpr','D8_dirChange','D15_g9_mean','D15_e_mean','D15_fc','D15_pval','D15_padj','D15_diffExpr','D15_dirChange')
-View(de)
-write.csv(de,'C:/Users/dmilovan/Documents/MY_DATA/DM_desk/human/2303_rnaseq_timcourse_znf436_kd/results/gene/tables/DMtables/20230622_DEG_g9vsE_D0D8D15.csv')
-
-
-de <- fread('C:/Users/dmilovan/Documents/MY_DATA/DM_desk/human/2303_rnaseq_timcourse_znf436_kd/results/gene/tables/DMtables/20230622_DEG_g9vsE_D0D8D15.csv')
-nrow(de) # 25 822
-View(de)
-de <- de[,-1]
-head(de)
-colnames(de)
-de <- de %>%
-  mutate(is.DEG = ifelse(D0_diffExpr == 'Yes', 'Yes',
-                         ifelse(D8_diffExpr == 'Yes', 'Yes',
-                                ifelse(D15_diffExpr == 'Yes', 'Yes', 'No'))))
-
-### ZNF436 KD DEGs and distance to the peaks
-load("U:/Team LVG/Danica/MY_DATA/LVG_data/Olga/ZNF436project/0-Script/Fig3_ZNF436KD.RData")
-
-DE.file = list.files(path ="U:/Team LVG/Danica/MY_DATA/LVG_data/Olga/ZNF436project/0-Script/5-ZNF436KD", 
-                     pattern="^DE_", full.names = T)
-
-DE.df = data.frame()
-View(DE.df)
-head(DE.df)
-
-# previously done, no need to run it
-for(i in seq_along(DE.file)){
-  File0 = DE.file[i]
-  name0 = gsub(".*/DE_", "", File0) %>% gsub("\\.xls", "", .)
-  Timepoint0 = gsub(".*_", "", name0)
-  df1 = data.table::fread(File0) %>%
-    mutate(Timepoint= Timepoint0,
-           log2.fc = ifelse(foldChange>0, log2(foldChange), 
-                            ifelse(foldChange<0, -log2(-foldChange), NA)),
-           FC.direction = ifelse(foldChange > 0, "Up","Down"),
-           Origin = name0, 
-           ENSEMBL = ensembl) %>%
-    dplyr::select(-ensembl)
-  DE.df = rbind(DE.df, df1)
-}
-
-
-
-####. Annotate diff genes with closest peak
-
-Annotate genes with closest peak using bedtools : DO NOT RUN
-Warning : one peak can be associated to several genes
-DO. NOT. RUN. !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-```{r}
-DE.df.ensID = DE.df %>% pull(ENSEMBL) %>% unique()
-
+DE.df = data.frame(de.15)
+# annotate diff genes with closest peak
 # annotation file from batcave to retrieve TSS coordinates 
 fread("/Users/rosspopoff/Dropbox/Trono_Lab/1-datasets/0-Ressource_annotation/1812_hg19_ens_all_genes_tss.bed") %>%
   stats::setNames(c("gene.tss.chr", "gene.tss.start", "gene.tss.end", 
@@ -277,7 +425,6 @@ system(paste0(
   "-a /Users/rosspopoff/Dropbox/Trono_Lab/40-L2M_Dana/5-ZNF436KD/ZNF436KD_genes_tss_coo_sorted.bed ",
   "-b /Users/rosspopoff/Dropbox/Trono_Lab/40-L2M_Dana/5-ZNF436KD/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80_sorted.bed ",
   "> /Users/rosspopoff/Dropbox/Trono_Lab/40-L2M_Dana/5-ZNF436KD/ZNF436KD_genes_tss_coo_nearest_peaks.bed"))
-```
 
 DE.df.peaks = 
   fread("U:/Team LVG/Danica/MY_DATA/LVG_data/Olga/ZNF436project/5-ZNF436KD/ZNF436KD_genes_tss_coo_nearest_peaks.bed") %>%
@@ -285,24 +432,22 @@ DE.df.peaks =
                     "peak.chr", "peak.start", "peak.end", "peak.ID","peak.score",
                     "dist.gene.tss2peak")) %>%
   # fix threshold for distance from peak to TSS here 
-  mutate(peak.ID = ifelse(dist.gene.tss2peak < 500000, peak.ID, NA), # as discussed, it'll be cyril's 500k distance
+  mutate(peak.ID = ifelse(dist.gene.tss2peak < 500000, peak.ID, NA), # 500k distance, as proposed in Pulver, et al. 2023
          is.436.peak.vicinity = ifelse(is.na(peak.ID), "No", "Yes")) %>%
-  left_join(All.hum.436peaks.annot.2ndary.target.synt %>%
+  left_join(All.hum.436peaks.annot %>%
               select(peak.ID, TE.chr, TE.start, TE.end, TE.fam, TE.sfam,
-                     peak.overlap,TE.fam.v2, annotation.v2, Secondary.target,
-                     Secondary.target.v2, is.lifted.peak, is.syntenic.gene,
-                     is.syntenic.peak) , by="peak.ID") %>%
+                     peak.overlap,TE.fam.v2, annotation.v2) , by="peak.ID") %>%
   mutate(annotation.v3 = ifelse(is.na(peak.ID), NA,
                                 ifelse(grepl("Promoter", annotation.v2),"Promoter",
                                        ifelse(grepl("Distal|Intron", annotation.v2), "CRE",
                                               ifelse(grepl("Exon", annotation.v2), "Exon",
                                                      "Mistake")))))
 
-View(DE.df.peaks)
-head(DE.df.peaks, 30)
-
-
-
+DE.df.peaks.deg <- DE.df.peaks %>%
+  dplyr::select(ENSEMBL, peak.ID, dist.gene.tss2peak, is.436.peak.vicinity, TE.sfam, TE.fam.v2, annotation.v2, annotation.v3) %>% 
+  merge(de.15 %>%
+          dplyr::select(ensembl, genename, symbol, mean.t15.g9, mean.t15.empty, foldChange, pval, diffExpr, log2.fc, FC.direction),
+        by.x = "ENSEMBL", by.y = "ensembl")
 
 # distances for the up and the down genes
 DE.df.peaks.deg %>%
@@ -320,12 +465,6 @@ wilcox.test(dist.gene.tss2peak ~ FC.direction, data = DE.df.peaks.deg %>%
   dplyr::filter(is.436.peak.vicinity == "Yes", Timepoint == "d15", diffExpr == "Yes") %>%
   dplyr::select(ENSEMBL, FC.direction, dist.gene.tss2peak) %>% distinct())
 
-hum.RNAseq.KD.bound %>%
-  dplyr::count(diffExpr, FC.direction, Timepoint) %>%
-  dplyr::filter(diffExpr =="Yes") %>%
-  mutate(n2= ifelse(FC.direction=="Down", -n, n)) %>%
-  group_by(Timepoint) %>%
-  mutate(sum = sum(n))
 
 # cluster profiler: GO and GSEA
 library(org.Hs.eg.db, include.only = c("org.Hs.eg.db"))
@@ -340,8 +479,6 @@ hum.RNAseq.KD.bound %>%
                          OrgDb = "org.Hs.eg.db", 
                          ont = "CC") %>%
   clusterProfiler::dotplot(., showCategory=20)
-
-library(org.Hs.eg.db, include.only = c("org.Hs.eg.db"))
 
 d15.G0 = 
   hum.RNAseq.KD.bound %>%
@@ -358,27 +495,201 @@ d15.G0 %>%
   theme_bw() + xlim(0,0.1) +
   theme(aspect.ratio=2)
 
-hum.RNAseq.KD.bound = 
-  DE.df %>%
-  left_join(DE.df.peaks, by="ENSEMBL") %>%
-  mutate(is.structural.component = 
-           ifelse(symbol %in% structural.PPI, "Yes", "No"))
 
-View(hum.RNAseq.KD.bound)
-head(hum.RNAseq.KD.bound)
-save(hum.RNAseq.KD.bound, file="0-Script/Fig3_df_hum.RNAseq.KD.bound.Rdata")
+################################################################################################################################################################################
+# python
+# 04 - beating frequency
+# singularity run docker://registry.c4science.ch/lvg/pyenv:v4
+conda  activate image
+ipython  --no-autoindent
+import cv2
+import os
+import numpy as np
+import tifffile
+import pandas as pd
 
-hum.RNAseq.KD.bound <- hum.RNAseq.KD.bound %>%
-  mutate(is.436.peak.vicinity.v2 = case_when(dist.gene.tss2peak < 500000 ~ "Yes",
-                                             TRUE ~ "No"))
-head(hum.RNAseq.KD.bound)
+import openpiv.tools
+import openpiv.pyprocess
+import openpiv.scaling
+import openpiv.validation
+import openpiv.filters
+import matplotlib.pyplot as plt
 
-```
+from scipy.stats import gaussian_kde
+from scipy.signal import find_peaks
+
+# Parameters for PIV
+window_size = 32
+overlap = 16
+dt = 0.12  # time between frames in sec 
+
+frame_range = 200
+
+images_dir = '/mnt/svfas6/Team LVG/Danica/MY_DATA/DM_bench/CM_beat/2024_v2_5x5_scale/'
+method = "sum"
+output_dir = f'../results/{method}'
+
+# Check if the directory exists
+if not os.path.exists(output_dir):
+    # If the directory does not exist, create it
+    os.makedirs(output_dir)
+    print(f"Directory {output_dir} created.")
+else:
+    print(f"Directory {output_dir} already exists.")
+
+data = []
+fft_all = []
+all_freq = []
+first = True
+# loop through files 
+for filename in os.listdir(images_dir):
+    if filename.endswith('tif'):
+        # STEP A : Load images
+        # prepare base name for output saving
+        file_base_name = os.path.splitext(filename)[0]
+        
+        # load images
+        all_images = tifffile.imread( images_dir + filename )
+        print("processing "+filename)
+        print(all_images.shape)
+        
+        images = all_images[0:frame_range]
+        print(f"Selected frame range : [0:{frame_range}]")
+        print(images.shape)
+
+        # STEP B
+        print("PIV processing")
+        # Process each pair of consecutive images
+        x, y, u, v = [], [], [], []
+        for i in range(len(images) - 1):
+            frame_a = images[i]
+            frame_b = images[i + 1]
+
+            u_, v_, sig2noise = openpiv.pyprocess.extended_search_area_piv(
+                frame_a.astype(np.int32),
+                frame_b.astype(np.int32),
+                window_size=window_size,
+                overlap=overlap,
+                dt=dt,
+                search_area_size=window_size,
+                sig2noise_method='peak2peak'
+            )
+
+            u.append(u_)
+            v.append(v_)
+
+        # Convert lists to numpy arrays
+        u = np.array(u)
+        v = np.array(v)
+        
+        # STEP C
+        print("Extracting frequencies")
+        # Calculate the magnitude of the velocity vector
+        velocity_magnitude = np.sqrt(u**2 + v**2)
+
+        # # comput indiv freq
+        for i in range(0, 17):
+            for j in range(0, 23):
+                fft_result = np.fft.fft(velocity_magnitude[:, i, j])
+                fft_freq = np.fft.fftfreq(len(fft_result), d=dt)
+                fft_magnitude = np.abs(fft_result)
+                peaks, properties = find_peaks(fft_magnitude, height=0)
+                sorted_peaks = np.argsort(properties['peak_heights'])[::-1]
+                dominant_frequency_1 = fft_freq[peaks][sorted_peaks[0]]
+                all_freq.append({"file": file_base_name, "dominant_freq": abs(dominant_frequency_1)})
 
 
-# beating frequency
+
+        # plt.close()
+        # pos = (15,15)
+        # density = gaussian_kde(velocity_magnitude[:, *pos])
+        # x = np.linspace(velocity_magnitude[:, *pos].min(), velocity_magnitude[:, *pos].max(), 1000)
+        # plt.plot(x, density(x))
+        # plt.axvline(np.quantile(velocity_magnitude[:, *pos], 0.8), color="red")
+        # plt.savefig("../results/denstiy.pdf")
+
+        # Sum the magnitude over all vectors for each frame to get a single time series
+        if method == "sum":
+            velocity_time_series = np.sum(velocity_magnitude, axis=(1, 2))
+        elif method == "q80":
+            velocity_time_series = np.quantile(velocity_magnitude, axis=(1, 2), q=0.8)
+
+        # Perform Fourier transform to find the dominant frequency
+        fft_result = np.fft.fft(velocity_time_series)
+        np.savetxt(output_dir + '/' + file_base_name + '_velocity_frequency.txt', velocity_time_series)
+        fft_freq = np.fft.fftfreq(len(fft_result), d=dt)
+        if first:
+            fft_prev = fft_freq
+            first = False
+        else:
+            print(all(fft_freq == fft_prev))
+        # Find the peaks in the FFT magnitude spectrum
+        fft_magnitude = np.abs(fft_result)
+        fft_all.append({"File": file_base_name, "fft": fft_magnitude})
+        peaks, properties = find_peaks(fft_magnitude, height=0)
+
+        # Sort peaks by their magnitude (height)
+        sorted_peaks = np.argsort(properties['peak_heights'])[::-1]
+
+        # Extract the frequencies of the two most dominant peaks
+        dominant_frequency_1 = fft_freq[peaks][sorted_peaks[0]]
+        dominant_frequency_2 = fft_freq[peaks][sorted_peaks[1]] if len(sorted_peaks) > 1 else None
+        dominant_frequency_3 = fft_freq[peaks][sorted_peaks[2]] if len(sorted_peaks) > 2 else None
+        dominant_frequency_4 = fft_freq[peaks][sorted_peaks[3]] if len(sorted_peaks) > 3 else None
+
+        # STEP D
+        print("Preparing outputs")
+        plt.close("all")
+        # Plot the results
+        plt.figure(figsize=(12, 6))
+
+        plt.subplot(2, 1, 1)
+        plt.plot(velocity_time_series)
+        plt.title('Velocity Time Series')
+        plt.xlabel('Frame')
+        plt.ylabel('Velocity Magnitude')
+
+        plt.subplot(2, 1, 2)
+        plt.plot(fft_freq, fft_magnitude)
+        plt.title('FFT of Velocity Time Series')
+        plt.xlabel('Frequency (Hz)')
+        plt.ylabel('Magnitude')
+
+        # Mark the dominant frequencies on the FFT plot
+        if dominant_frequency_1 is not None:
+            plt.plot(dominant_frequency_1, fft_magnitude[peaks][sorted_peaks[0]], 'ro')
+        if dominant_frequency_2 is not None:
+            plt.plot(dominant_frequency_2, fft_magnitude[peaks][sorted_peaks[1]], 'ro')
+        if dominant_frequency_3 is not None:
+            plt.plot(dominant_frequency_3, fft_magnitude[peaks][sorted_peaks[2]], 'bo')
+        if dominant_frequency_4 is not None:
+            plt.plot(dominant_frequency_4, fft_magnitude[peaks][sorted_peaks[3]], 'bo')
+
+        plt.savefig(output_dir + '/' + file_base_name + '_velocity_frequency_plot.pdf')
+
+        # Save the dominant frequencies to a CSV file
+        data.append( {
+            'File': filename,
+            'Dominant Frequency 1 (Hz)': dominant_frequency_1,
+            'Dominant Frequency 2 (Hz)': dominant_frequency_2 if dominant_frequency_2 is not None else [np.nan],
+            'Dominant Frequency 3 (Hz)': dominant_frequency_3 if dominant_frequency_3 is not None else [np.nan],
+            'Dominant Frequency 4 (Hz)': dominant_frequency_4 if dominant_frequency_4 is not None else [np.nan]
+        })
+    df = pd.DataFrame(data)
+    df.to_csv( os.path.join(output_dir,  method + '_summary_dominant_frequencies.csv'), index=False)
+    all_fft_df = pd.DataFrame(fft_all)["fft"].apply(pd.Series)
+    all_fft_df.columns = fft_freq
+    final_df = pd.concat([pd.DataFrame(fft_all)["File"], all_fft_df], axis=1)
+    final_df.to_csv( os.path.join(output_dir,  method + '_allfft.csv'), index=False)
+
+    all_freq_df = pd.DataFrame(all_freq)
+    all_freq_df.to_csv("../results/all_frequencies_patch.csv")
+
+################################################################################################################################################################################
+# R
+# 05 - beating frequency
 # patch frequencies - python results from jduc
-```{r}
+
 beat <- fread("Y:/danica/2408_beatit/results/all_frequencies_patch.csv")
 head(beat)
 beat <- beat %>%
@@ -409,45 +720,21 @@ beat.plot <- ggplot(beat.summary, aes(x = condition, y = mean.freq)) +
   geom_boxplot(outlier.shape = NA) +  
   geom_jitter() +
   geom_stat_mean()
-beat.plot
-
-
-
-```
-
 
 
 
 
 #########################################################
-
-
-### - Expression of ZNF436 KD DEGs in Fetal tissue
-```{r,  fig.height=5, fig.width=3}
-# load d15 kd data
-head(DE.df.peaks.deg)
+# R
+# 05 - Expression of ZNF436 KD DEGs in Fetal tissue
 de.d15 <- DE.df.peaks.deg %>%
   dplyr::filter(Timepoint == "d15") %>%
   dplyr::select(ENSEMBL, symbol, genename, mean.KDg9, mean.Emp, foldChange, pval, diffExpr, FC.direction) %>%
   distinct()
-head(de.d15)
-nrow(de.d15)
-head(CT.Exp)
 
 de.d15.CT <- merge(de.d15, CT.Exp, by = 'ENSEMBL', all.x = T)
-head(de.d15.CT)
-de.d15.CT %>% pull(ENSEMBL) %>% unique() %>% length() # 25 822
-```
-
-# final volcano plot
-```{r}
 symbolsToLabel <- c("ZNF436","CD7","THEMIS2")
-head(structural.PPI)
-diffMarkers <- c("TNNT2", "TBX5", "GATA4", "MEF2C")
 
-View(de.d15.CT[de.d15.CT %in% symbolsToLabel,])
-  
-head(de.d15.CT)
 de.volplot <- de.d15.CT %>%
   dplyr::select(ENSEMBL, symbol, foldChange, pval) %>%
   distinct() %>%
@@ -468,12 +755,7 @@ de.volplot <- de.d15.CT %>%
   geom_vline(xintercept = c(-1,1), linetype = "dashed") +
   theme_bw() +
   theme(aspect.ratio = 1, axis.title = element_text(size = 20), legend.position = "bottom")
-de.volplot
-ggsave("C:/Users/dmilovan/Desktop/data/CM_kd/202504_D15_kd_labelledSymbols_new.pdf", height = 3.5, width = 7, device = cairo_pdf)
-```
 
-
-```{r}
 # What is the organ|tissue of max expression?
 de.d15.CT.o <- de.d15.CT %>%
   group_by(ENSEMBL) %>%
@@ -495,8 +777,6 @@ de.d15.CT.o <- de.d15.CT %>%
                                   Max.organ == "Placenta" ~ "Other",
                                   Max.organ == "Lung" ~ "Other",
                                   Max.organ == "Adrenal" ~ "Other"))
-head(de.d15.CT.o)
-
 
 # manual categorization of cell types base don their function and origin
 cell_categories <- list(
@@ -533,7 +813,6 @@ head(category_lookup)
 # merge with the cell type label
 de.d15.CT.oc <- de.d15.CT.o %>%
   left_join(category_lookup, by = "Type")
-head(de.d15.CT.oc)
 
 # max cell type of origin
 de.d15.CT.oc <- de.d15.CT.oc %>%
@@ -545,14 +824,7 @@ de.d15.CT.oc <- de.d15.CT.oc %>%
 de.d15.CT.short <- de.d15.CT.oc %>%
   dplyr::select(ENSEMBL, symbol, genename, foldChange, diffExpr, FC.direction, Max.organ.v2, Max.cell.type) %>%
   distinct()
-head(de.d15.CT.short)
-View(de.d15.CT.short %>% dplyr::filter(diffExpr == "Yes"))
 
-```
-
-
-```{r}
-head(de.d15.CT.short)               
 # pie chart
 de.d15.CT.short %>%
   mutate(Max.cell.type = case_when(is.na(Max.cell.type) ~ "Misc",
@@ -579,7 +851,6 @@ de.d15.CT.short %>%
     panel.grid = element_blank(),
     aspect.ratio = 1
   )
-ggsave("C:/Users/dmilovan/Desktop/data/CM_kd/202504_D15_kd_MaxCellType_pie.pdf", height = 10, width = 10)
 
 
 # for the max organ|tissue now
@@ -608,14 +879,7 @@ de.d15.CT.short %>%
     panel.grid = element_blank(),
     aspect.ratio = 1
   )
-ggsave("C:/Users/dmilovan/Desktop/data/CM_kd/202504_d15_kd_MaxOrgan_pie.pdf", height = 10, width = 10)
 
-```
-
-
-
-
-```{r}
 # chi-sq test of proportions of fetal cell types being equal:
 # contingency table
 Cell.type.counts <- de.d15.CT.short %>%
