@@ -1,0 +1,337 @@
+# TURBO-ID
+
+# R 
+# 01 - data processing from MS 
+
+source("C:/Users/dmilovan/Documents/MY_DATA/DM_desk/R_scripts/commonFuns.R") # check out other Trono lab publications, such as de Tribolet-Hardy, et al. 2023
+library(clusterProfiler)
+library(dplyr)
+library(stringr)
+library(manhattanly)
+library(vsn)
+library(hexbin)
+library(statmod)
+library(DEP)
+library(data.table)
+library(proDA) # https://code.bioconductor.org/browse/proDA/tree/RELEASE_3_17/vignettes/
+library(pheatmap)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(viridisLite)
+library(viridis)
+library(stringr)
+
+cm.maxquant.data <- as.data.frame(fread("U:/Team LVG/Danica/MY_DATA/DM_bench/TiD/202405_CM_results/proteinGroups.txt"))
+View(cm.maxquant.data)
+
+### Read in the data and prepare
+###################################
+colnames(cm.maxquant.data) <- gsub(" ", "_", colnames(cm.maxquant.data))
+colnames(cm.maxquant.data) <- gsub("_436", "_436", colnames(cm.maxquant.data))
+colnames(cm.maxquant.data) <- gsub("GFP", "GFP", colnames(cm.maxquant.data))
+colnames(cm.maxquant.data) <- gsub("dK", "dK", colnames(cm.maxquant.data))
+colnames(cm.maxquant.data) <- gsub("TRE", "TRE", colnames(cm.maxquant.data))
+colnames(cm.maxquant.data) <- gsub("wt", "wt", colnames(cm.maxquant.data))
+cm.maxquant.data.u <- make_unique(cm.maxquant.data, "Gene_names", "Protein_IDs", delim=";")
+
+# manually removing the data which has problematin NA distribution
+cm.maxquant.data.u <- cm.maxquant.data.u[, !grepl("GFP_Bio_R3", colnames(cm.maxquant.data.u))]
+
+Group <- gsub("LFQ_intensity.", "", colnames(cm.maxquant.data.u[, grep("^LFQ", colnames(cm.maxquant.data.u))]))
+stopifnot(any(grepl("_R1", Group)))
+rep <- str_match(Group, "R(\\d+)")[, 2]
+Group <- gsub("_R(\\d+)", "", Group)
+labels <- gsub("LFQ_intensity_", "", colnames(cm.maxquant.data.u[, grep("^LFQ", colnames(cm.maxquant.data.u))]))
+
+# What is the design
+design2 <- data.frame(label=labels,
+                     condition=Group,
+                     replicate=rep)
+
+# manual change of design matrix for comparisons
+design2$condition <- c('dK_bio','dK_bio','dK_bio','dK','dK', 'dK','GFP','GFP','436','436','436','wt','wt','wt','436_bio','436_bio','436_bio','436','436','436')
+design2$replicate <- c(1,2,3,4,5,6,2,3,1,2,3,1,2,3,4,5,6,7,8,9)
+design3 <- design2[-c(9,10,11),]
+design4 <- design2
+design4$condition <- c('dK_bio','dK_bio','dK_bio',
+                       'dK','dK','dK',
+                       'GFP','GFP',
+                       'TRE_ZNF436','TRE_ZNF436','TRE_ZNF436',
+                       'wt','wt','wt',
+                       'ZNF436_bio','ZNF436_bio','ZNF436_bio',
+                       'ZNF436','ZNF436','ZNF436')
+design4
+design5 <- design4[-c(9:11),]
+design5
+design5$condition <- c('dK','dK','dK','dK','dK','dK',
+                       'GFP','GFP','wt','wt','wt',
+                       'ZNF436','ZNF436','ZNF436','ZNF436','ZNF436','ZNF436')
+design5$replicate <- c(1,2,3,4,5,6,
+                       1,2,1,2,3,
+                       1,2,3,4,5,6)
+
+# design 2 is all 436 samples together (9 of those, +b, -b, pTRE+b), and design 3 is w/o pTRE+b samples
+
+# make a table with the comparison design
+?make_se
+se <- make_se(cm.maxquant.data.u, grep("^LFQ", colnames(cm.maxquant.data.u)), design5)
+View(se)
+
+# QC 
+plot_frequency(se)
+se.filt <- filter_missval(se, thr=0)
+plot_numbers(se.filt)
+plot_coverage(se.filt)
+
+# Normalization
+se.norm <- normalize_vsn(se.filt)
+plot_normalization(se.filt, se.norm)
+
+# Missing values
+plot_missval(se.norm)
+plot_detect(se.norm)
+
+dat <- as.data.frame(se.norm@assays@data@listData)
+dat <- ifelse(is.na(dat), 0, 1)
+heatmap.2(dat, scale='none', col=c('white', 'black'), trace='none', key=F)
+
+
+# Get protein with all NA in one condition
+# proteins_MNAR <- get_df_long(se.norm) %>%
+#   group_by(name, condition) %>%
+#   summarize(NAs = all(is.na(intensity))) %>% 
+#   filter(NAs) %>% 
+#   pull(name) %>% 
+#   unique()==
+# MNAR <- names(se.norm) %in% proteins_MNAR
+# se.imp <- impute(se.norm, fun="QRILC", tune.sigma=0.1)
+
+set.seed(16041995) # important to use the same number, otherwise it gives you slightly different results :/
+# se.imp <- impute(se.norm, fun="mixed", randna=!MNAR, mar="knn", mnar="MinProb")
+tmp_imp <- impute(se.norm, fun = "MinProb", q = 0.05) #var of the distribution of the imputed NAs, most important param to check and change when imputing
+tmp_imp_knn <- impute(se.norm, fun = "knn", rowmax = 0.8) 
+raw = as.data.frame(se.norm@assays@data@listData)
+dat.mnar = as.data.frame(tmp_imp@assays@data@listData)
+dat.nar = as.data.frame(tmp_imp_knn@assays@data@listData)
+se.imp <- tmp_imp
+nrepl <- table(Group)
+sel.mnar <- t(apply(is.na(raw), 1, function(x) {
+  res <- c()
+  for (g in (unique(Group))){
+    sel <- Group == g
+    res <- c(res, rep(sum(x[sel])==nrepl[g], each=nrepl[g]))
+  }
+  res
+}))
+dat <- dat.nar
+dat[sel.mnar] <- dat.mnar[sel.mnar]  
+se.imp@assays@data@listData <- list(as.matrix(dat))
+
+plot_imputation(se.norm, se.imp)
+
+##################################################################################################################################################################################
+# R
+# 02 - data analysis for comparisons and representation
+# DE
+
+# A. here I am splitting individually +external.biotin vs. -external.biotin samples
+# samples comparisons used for representation are ZNF436_bio_vs_GFP and dK_bio_vs_GFP
+contrasts <- list(c("TRE_ZNF436_vs_ZNF436_bio"), c("TRE_ZNF436_vs_ZNF436"),
+                  c("ZNF436_bio_vs_ZNF436"),c("dK_bio_vs_dK"),
+                  c("TRE_ZNF436_vs_dK_bio"), c("TRE_ZNF436_vs_dK"),
+                  c("ZNF436_bio_vs_dK_bio"),c("ZNF436_bio_vs_dK"),
+                  c("ZNF436_vs_dK_bio"), c("ZNF436_vs_dK"),
+                  c("TRE_ZNF436_vs_GFP"), c("TRE_ZNF436_vs_wt"),
+                  c("ZNF436_bio_vs_GFP"), c("ZNF436_bio_vs_wt"),
+                  c("ZNF436_vs_GFP"), c("ZNF436_vs_wt"),
+                  c("dK_bio_vs_GFP"), c("dK_bio_vs_wt"),
+                  c("dK_vs_GFP"), c("dK_vs_wt"), c("GFP_vs_wt"),
+                  c("ZNF436_bio_vs_dK_bio_vs_GFP"))
+
+# B. Here, +/-extrenal.biotin samples are pulled
+# sapmple comparison is ZNF436_vs_dK: it is 6vs6 samples; TRE_ZNF436_sampels are excluded
+contrasts5 <- list(c("ZNF436_vs_dK"), 
+                  c("ZNF436_vs_GFP"), c("ZNF436_vs_wt"),
+                  c("dK_vs_GFP"), c("dK_vs_wt"), c("GFP_vs_wt"))
+
+for (contrast in contrasts){
+  outdir <- paste0("C:/Users/dmilovan/Desktop/data/TiD/202410/results/tables-11", contrast)
+  mydircreate(outdir)
+  se.diff <- DEP::test_diff(se.imp, type="manual", test=contrast)
+  dep <- add_rejections(se.diff, alpha = 0.05, lfc = log2(1.5))
+
+# Volcano
+  p <- plot_volcano(dep, contrast=contrast, label_size=2, add_names=TRUE, adjusted=T)
+  p <- p + geom_hline(yintercept=-log10(0.05), linetype="dashed", color = "red")
+  p <- p + geom_vline(xintercept=log2(1.5), linetype="dashed", color = "red")
+  p <- p + geom_vline(xintercept=-log2(1.5), linetype="dashed", color = "red")
+
+  print(plot_pca(dep, x=1, y=2, n=1500, point_size=3))
+  print(plot_pca(dep, x=1, y=3, n=1500, point_size=3))
+  print(plot_pca(dep, x=2, y=3, n=1500, point_size=3))
+  dev.off()
+  xout <- get_results(dep)
+  wide <- get_df_wide(dep)
+  xout <- xout[, c("name", "ID", colnames(xout)[grepl(paste0(contrast, "|centered"), colnames(xout))])]
+  o <- order(xout[, paste0(contrast, "_p.adj")])
+  write.table(xout[o, ], paste0(outdir, "/table_", contrast, ".xls"), sep="\t", row.names=F)
+  write.table(wide, paste0(outdir, "/table_full_", contrast, ".xls"), sep="\t", row.names=F)
+  xout.2 <- get_df_wide(dep) 
+  o <- order(xout.2[, paste0(contrast, "_p.adj")])
+  write.table(xout.2[o, ], paste0(outdir, "/table_all_", contrast, ".xls"), sep="\t", row.names=F)
+}
+
+############
+# PLOTTING
+# full length
+znf436vsGFP.cm <- fread('C:/Users/dmilovan/Desktop/data/TiD/final/tables9_table_ZNF436_bio_vs_GFP.xls')
+vol.436vsGFP.cm <- ggplot(znf436vsGFP.cm, aes(x = ZNF436_bio_vs_GFP_ratio, y = -log10(ZNF436_bio_vs_GFP_p.adj))) + 
+  geom_point(alpha = 0.5, size = 3) +
+  scale_color_viridis(discrete=TRUE, option = 'E') +
+  theme(axis.title = element_text(size = 20))+
+  theme_bw() +
+  theme(aspect.ratio = 1) +
+  xlab('ZNF436 vs. GFP')+
+  ylab('-log10(p.adj)')+
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") + 
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed")+  # what is supposed to be here?
+  geom_text_repel(data = znf436vsGFP.cm[znf436vsGFP.cm$ZNF436_bio_vs_GFP_significant == 'TRUE',], aes(label = name), max.overlaps = Inf, size = 3, force = 0.5, nudge_y = 0.05) +
+  geom_text_repel(data = znf436vsGFP.cm[name == 'ZNF436'], aes(label = name), col = '#007480', size = 5, force = 1, nudge_y = 0.5, nudge_x = 0.5)
+
+# same for deltaKRAB
+dKvsGFP.cm <- fread('C:/Users/dmilovan/Desktop/data/TiD/final/tables9_table_dK_bio_vs_GFP.xls')
+vol.dKvsGFP.cm <- ggplot(dKvsGFP.cm, aes(x = dK_bio_vs_GFP_ratio, y = -log10(dK_bio_vs_GFP_p.adj))) + 
+  geom_point(alpha = 0.5, size = 3) +
+  scale_color_viridis(discrete=TRUE, option = 'E') +
+  theme(axis.title = element_text(size = 20))+
+  theme_bw() +
+  theme(aspect.ratio = 1) +
+  xlab('dK vs. GFP')+
+  ylab('-log10(p.adj)')+
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") + 
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed")+  # what is supposed to be here?
+  # scale_x_continuous(breaks = c(seq(-100, 100, 50))) +
+  # adding the symbols of genes on the plot
+  # you can include/ exclude certain labels to be printed on the plot
+  geom_text_repel(data = dKvsGFP.cm[dKvsGFP.cm$dK_bio_vs_GFP_significant == 'TRUE',], aes(label = name), max.overlaps = Inf, size = 3, force = 0.5, nudge_y = 0.05) +
+  geom_text_repel(data = dKvsGFP.cm[name == 'ZNF436'], aes(label = name), col = '#007480', size = 5, force = 1, nudge_y = 0.5, nudge_x = 0.5)
+
+d15.tid <- merge(znf436vsGFP.cm, dKvsGFP.cm, by = 'name') %>%
+  mutate(is.fl = ifelse(ZNF436_bio_vs_GFP_significant == TRUE & dK_bio_vs_GFP_significant == TRUE, 'Yes','No'))
+names <- d15.tid %>% dplyr::filter(is.sig.436vsGFP == 'Yes') %>% 
+  dplyr::select(name)
+
+d15.436.tid.l <- znf436vsGFP.cm %>%
+  dplyr::select(name, ZNF436_bio_vs_GFP_ratio, ZNF436_bio_vs_GFP_p.adj, ZNF436_bio_vs_GFP_significant) %>%
+  dplyr::rename(ratio =  ZNF436_bio_vs_GFP_ratio, p.adj = ZNF436_bio_vs_GFP_p.adj, sig = ZNF436_bio_vs_GFP_significant) %>%
+  mutate(cond = '436vsGFP', day = 15)
+d15.dk.tid.l <- dKvsGFP.cm %>%
+  dplyr::select(name, dK_bio_vs_GFP_ratio, dK_bio_vs_GFP_p.adj, dK_bio_vs_GFP_significant) %>%
+  dplyr::rename(ratio =  dK_bio_vs_GFP_ratio, p.adj = dK_bio_vs_GFP_p.adj, sig = dK_bio_vs_GFP_significant) %>%
+  mutate(cond = 'dKvsGFP', day = 15)
+tid.l <- rbind(d15.436.tid.l,d15.dk.tid.l)
+names <- tid.l %>% dplyr::filter(sig == TRUE & cond == '436vsGFP' & day == 15 & ratio > 0) %>%
+  dplyr::pull(name)
+
+tid.l.volplots <- tid.l %>%
+  mutate(is.fl.cm = ifelse(name %in% names, 'Yes','No')) %>%
+  ggplot(aes(x = ratio, y = -log10(p.adj), color = is.fl.cm)) +
+  geom_point(alpha = 0.5, size = 3) +
+  theme(axis.title = element_text(size = 20))+
+  theme_bw() +
+  theme(aspect.ratio = 1) +
+  xlab('log2(fc)')+
+  ylab('-log10(p.adj)')+
+  geom_hline(yintercept=-log10(0.05), linetype="dashed", color = "red") +
+  geom_vline(xintercept=log2(1.5), linetype="dashed", color = "red") +
+  geom_vline(xintercept=-log2(1.5), linetype="dashed", color = "red") +
+  facet_grid(~cond) 
+
+# manually asigned the role from literature search
+tid.l$role <- NA
+
+# fl vs. dk final 
+# the tables is w/o TRE samples, and bio-nobio samples are pulled together, resulting w/ 6vs6 
+FLvsDK.cm <- fread('C:/Users/dmilovan/Desktop/data/TiD/final/tables10_noTRE_6vs6_table_ZNF436_vs_dK_manAnno.csv') %>%
+  mutate(role = ifelse(role == "RNAPOl2", "RNAPOL2", role))
+
+FLvsDK.cm.volplot <- FLvsDK.cm %>%
+  mutate(role = ifelse(role == "RNAPOl2", "RNAPOL2", role)) %>%
+  ggplot(aes(x = ZNF436_vs_dK_ratio, y = -log10(ZNF436_vs_dK_p.adj), color = role)) +
+  geom_point(alpha = 0.5, size = 3) +
+  theme(axis.title = element_text(size = 20))+
+  theme_bw() +
+  theme(aspect.ratio = 1) +
+  xlab('log2(fc)')+
+  ylab('-log10(p.adj)')+
+  geom_hline(yintercept=-log10(0.05), linetype="dashed", color = "red") +
+  geom_vline(xintercept=log2(1.5), linetype="dashed", color = "red") +
+  geom_vline(xintercept=-log2(1.5), linetype="dashed", color = "red") +
+  geom_text_repel(data = FLvsDK.cm[FLvsDK.cm$ZNF436_vs_dK_significant == TRUE,], 
+                  aes(label = name), 
+                  max.overlaps = Inf, size = 3, force = 0.5, nudge_y = 0.05) 
+
+final <- FLvsDK.cm %>%
+  dplyr::select(name, ZNF436_vs_dK_ratio, ZNF436_vs_dK_p.adj, ZNF436_vs_dK_significant, role) %>%
+  dplyr::rename(ratio =  ZNF436_vs_dK_ratio, p.adj = ZNF436_vs_dK_p.adj, sig = ZNF436_vs_dK_significant) %>%
+  mutate(cond = 'FLvsDK', day = 15) 
+tid.final <- rbind(tid.l, final, fill = T)
+tid.final <- tid.final %>%
+  mutate(is.fl.cm = ifelse(name %in% names2, 'Yes','No')) %>%
+  group_by(name) %>% mutate(role = first(na.omit(role))) %>% ungroup()
+tid.final %>%
+  fwrite("C:/Users/dmilovan/Desktop/data/TiD/202504_TIDfinal.csv")
+
+names2 <- tid.final %>% dplyr::filter(sig == TRUE & cond == 'FLvsDK' & ratio > 0) %>%
+  dplyr::pull(name)
+names2
+
+# for sup to label the prots that are enriched
+FLvsDK.dotplot <- tid.final %>%
+  dplyr::filter(name %in% names2) %>%
+  dplyr::filter(cond == 'FLvsDK') %>%
+  mutate(name = fct_reorder(name, role, .fun = ~ first(.))) %>%
+  ggplot(aes(x = name, y = '', group_by = role)) +
+  geom_point(aes(alpha = -log10(p.adj), size = ratio, color = sig)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  facet_grid(cond~day)
+
+portions.plot <- tid.final %>%
+  mutate(role = ifelse(role == "RNAPOl2", "RNAPOL2", role)) %>%
+  dplyr::filter(cond == 'FLvsDK' & sig == TRUE & role != "" & !is.na(role) & ratio > 0) %>% distinct() %>%
+  dplyr::count(role, na.rm = TRUE) %>%  # Count occurrences of 'role'
+  mutate(role = fct_reorder(role, n, .desc = TRUE)) %>%  # Reorder roles by count
+  ggplot(aes(x = role, y = n, fill = role)) +  # Use role for x-axis and fill
+  geom_bar(stat = "identity", width = 0.8) +  # Create a bar chart
+  geom_text(aes(label = n), position = position_stack(vjust = 0.5)) +  # Add labels
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis text for readability
+        axis.ticks = element_blank(),  # Remove axis ticks
+        panel.grid = element_blank(),  # Remove grid lines
+        aspect.ratio = 1)  
+
+# PBAF/cBAF enrichemnts
+bafs <- c("PBRM1","BRD7","ARID1A","DPF2","SMARCA2","SMARCA4","SMARCC2")
+tid.bafs <- tid.final %>%
+  dplyr::filter(name %in% bafs, day == 15) %>% 
+  mutate(baf = case_when(name == "PBRM1" ~ "PBAF",
+                         name == "BRD7" ~ "PBAF",
+                         name == "ARID1A" ~ "cBAF",
+                         name == "DPF2" ~ "cBAF",
+                         TRUE ~ "shared"))
+
+tid.bafs %>%
+  ggplot(aes(x = cond, y = ratio, fill = cond)) +
+  geom_bar(stat = "identity") +
+  facet_grid(.~baf) +
+  theme_bw() +
+  theme(aspect.ratio = 1)
+
+#################################################################################################################################################################################
+#################################################################################################################################################################################
+# ATAC
+
+
+
