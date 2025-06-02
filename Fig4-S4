@@ -333,5 +333,250 @@ tid.bafs %>%
 #################################################################################################################################################################################
 # ATAC
 
+# bash
+# 01 - bedtools intersect 
+bedtools intersect -wao -a d0d15_cat_sorted.bed -b 
+
+d0d15peak.all <- fread('C:/Users/dmilovan/Desktop/data/ATAC/peaks/d0d15_cat_sorted_d0atac_d15atac__436peaks.bed') %>%
+  dplyr::select(-c(12:14,16:17)) %>%
+  setNames(c('chrom','start','end','chrom.d0','start.d0','end.d0','overlap.d0',
+             'chrom.d15','start.d15','end.d15','overlap.d15','peak.ID'))
+d0d15peak.all <- d0d15peak.all %>%
+  mutate(is.peak.d0 = case_when(chrom.d0 != '.' ~ 'Yes'),
+         is.peak.d15 = case_when(chrom.d15 != '.' ~ 'Yes'),
+         is.peak = case_when(chrom.d0 != '.' & chrom.d15 != '.' ~ 'both',
+                             chrom.d0 != '.' & chrom.d15 == '.' ~ 'd0',
+                             chrom.d0 == '.' & chrom.d15 != '.' ~ 'd15'))
+d0d15peak.all$atac.ID <- paste0('peak_',rownames(d0d15peak.all))
+
+peak436.is.atac.peak <- d0d15peak.all %>% dplyr::select(peak.ID) %>% distinct() %>%
+  dplyr::filter(peak.ID != '.') 
+
+# genomic features od regions
+txdb <- TxDb.Hsapiens.UCSC.hg19.knownGene
+annoDb = "org.Hs.eg.db"
+peak436.atac.annot = 
+  d0d15peak.all %>%
+  dplyr::filter(peak.ID != '.') %>% 
+  dplyr::select(chrom, start, end, peak.ID) %>%
+  GenomicRanges::makeGRangesFromDataFrame(.,
+                                          keep.extra.columns = TRUE,
+                                          ignore.strand = TRUE,
+                                          seqinfo = NULL,
+                                          seqnames.field = "chrom",
+                                          start.field = "start",
+                                          end.field = "end",
+                                          starts.in.df.are.0based = FALSE,
+                                          na.rm = TRUE) %>%
+  ChIPseeker::annotatePeak(.,
+                           annoDb = annoDb,
+                           TxDb = txdb,
+                           tssRegion = c(-1000, 500)) %>% # consistency in anoo of proms!!!
+  as.data.frame() %>%
+  dplyr::mutate(annotation.v2 = dplyr::case_when(grepl("Intron", annotation) ~ "Intron",
+                                                 grepl("3|5", annotation) ~ "Exon",
+                                                 grepl("Exon", annotation) ~ "Exon",
+                                                 TRUE ~ annotation))
+
+d15.ctrl.436peak <- fread('C:/Users/dmilovan/Desktop/data/ATAC/intersect/d15_ctrl__436peaks.bed') %>%
+  setNames(c('chrom','start','end','chrom.436','start.436','end.436','peak.ID','score','overlap')) %>%
+  mutate(is.436peak.d15 = case_when(peak.ID != '.' ~ 'Yes', TRUE ~ NA)) %>%
+  merge(peaks436, by = 'peak.ID', all = T)
+
+# counted ATAC signal on 436 peaks
+# metadata
+atac.meta <- tribble(
+  ~file,                                             ~condition, ~replicate, ~day,
+  "d15_ctrl_r1_436peaks.tab",                        "ctrl",     1,          15,
+  "d15_ctrl_r2_436peaks.tab",                        "ctrl",     2,          15,
+  "d15_ctrl_r3_436peaks.tab",                        "ctrl",     3,          15,
+  "d15_kd_r1_436peaks.tab",                          "kd",       1,          15,
+  "d15_kd_r2_436peaks.tab",                          "kd",       2,          15,
+  "d15_kd_r3_436peaks.tab",                          "kd",       3,          15
+)
+atac.path <- "C:/Users/dmilovan/Desktop/data/ATAC/quant/"
+# Read and combine all files
+d15.436atac.all <- atac.meta %>%
+  mutate(full_path = file.path(atac.path, file)) %>%
+  pmap_dfr(function(full_path, condition, replicate, day, ...) {
+    fread(full_path) %>%
+      setNames(c("peak.ID", "size", "covered", "sum", "mean0", "mean")) %>%
+      mutate(condition = condition, replicate = replicate, day = day)
+  })
+
+atac.436peaks.stats <- d15.436atac.all[, .(
+  # Calculate mean signal for each condition
+  mean.ctrl = mean(mean[condition == "ctrl"], na.rm = TRUE),
+  mean.kd = mean(mean[condition == "kd"], na.rm = TRUE),
+  # Calculate fold change
+  fc.kdVSctrl = mean(mean[condition == "kd"], na.rm = TRUE) / 
+    mean(mean[condition == "ctrl"], na.rm = TRUE),
+  # Perform t-test between conditions
+  p.value = t.test(mean[condition == "ctrl"], 
+                   mean[condition == "kd"])$p.value
+), by = .(peak.ID, day)]
+
+# pivot
+atac.436peaks.stats.piv <- atac.436peaks.stats %>%
+  # dplyr::filter(mean.ctrl + mean.kd > 2) %>% 
+  pivot_longer(
+    cols = c(mean.ctrl, mean.kd),
+    names_to = "condition",    
+    values_to = "mean"           
+  ) %>% 
+  mutate(condition = sub("mean\\.", "", condition)) %>%
+  mutate(DA.dir = case_when(p.value < 0.05 & fc.kdVSctrl > 1.5 ~ 'up',
+                            p.value < 0.05 & fc.kdVSctrl < 1/1.5 ~ 'down',
+                            TRUE ~ 'ns')) %>% 
+  mutate(sig = case_when(DA.dir == 'ns' ~ 'ns',
+                         TRUE ~ 'sig')) %>%
+  dplyr::filter(peak.ID %in% peak436.is.atac.peak$peak.ID)
+
+atac.full <- atac.436peaks.stats.piv %>%
+  mutate(is.GOA = case_when(DA.dir == "up" & sig == "sig" ~ "Yes",
+                            TRUE ~ "No"))
+
+peak436.anno <- peak436.atac.annot %>%
+  dplyr::select(peak.ID, annotation.v2, SYMBOL) %>% distinct()
+atac.full <- atac.full %>%
+  merge(peak436.anno, by = "peak.ID", all = T)
+
+atac.full.v2 <- atac.full %>%
+  group_by(peak.ID) %>%
+  mutate(annotation.v3 = ifelse("Promoter" %in% annotation.v2, "Promoter",
+                         ifelse("Exon" %in% annotation.v2, "Exon",
+                         ifelse("Intron" %in% annotation.v2, "Intron", "Distal Intergenic"))))
+atac.full.v2 %>%
+  dplyr::filter(sig == "sig", peak.ID != ".", !is.na(peak.ID)) %>%
+  distinct(peak.ID, annotation.v2, DA.dir, .keep_all = TRUE) %>% 
+  dplyr::count(annotation.v3, DA.dir)
+
+atac.full.plot <- atac.full.v2 %>%
+  dplyr::filter(sig == "sig", peak.ID != ".", !is.na(peak.ID)) %>%
+  dplyr::select(peak.ID, annotation.v3, DA.dir) %>% 
+  distinct() %>%
+  dplyr::count(annotation.v3, DA.dir) %>%
+  ggplot(aes(x = DA.dir, y = n, fill = annotation.v3)) +
+  geom_bar(stat = "identity", width = 1) +  
+  geom_text(aes(label = n), position = position_stack(vjust = 0.5)) + 
+  theme_bw() +
+  theme(axis.ticks = element_blank(),
+        panel.grid = element_blank(),
+        aspect.ratio = 1) 
+
+atac.full.v2 %>%
+  dplyr::filter(sig == "sig", peak.ID != ".", !is.na(peak.ID)) %>%
+  dplyr::select(peak.ID, annotation.v3, DA.dir) %>% 
+  distinct() %>%
+  dplyr::count(annotation.v3, DA.dir) %>% 
+  dplyr::filter(DA.dir == "up", annotation.v3 == "Promoter") %>% 
+  nrow()
+
+# IMPORTANT FIX ON THE PROMOTER COUNT
+DA.250.up <- fread('C:/Users/dmilovan/Desktop/data/ATAC/202501_250DA-up-d15-436peaks.bed') %>%
+  setNames(c("chr","start","end","peak.ID","score")) %>%
+  mutate(is.GOA = "Yes")
+
+head(All.hum.436peaks.annot.2ndary.target)
+GOA.te <- merge(DA.250.up %>% dplyr::select(peak.ID, is.GOA), 
+         All.hum.436peaks.annot.2ndary.target %>%
+           dplyr::select(peak.ID, TE.fam.v2, Secondary.target.v2, annotation.v2, SYMBOL), by = "peak.ID") %>%
+  mutate(is.L2MIR = case_when(TE.fam.v2 == "LINE?L2" ~ "L2",
+                              TE.fam.v2 == "SINE/MIR" ~ "MIR",
+                              Secondary.target.v2 == "L2" ~ "L2",
+                              Secondary.target.v2 == "MIR" ~ "MIR",
+                              TRUE ~ "other")) %>% 
+  mutate(is.L2MIR.v2 = case_when(is.L2MIR == "other" ~ "No",
+                                 TRUE ~ "Yes")) %>%
+  mutate(annotation.v3 = case_when(annotation.v2 == "Distal Intergenic" ~ "CRE",
+                                   annotation.v2 == "Intronic" ~ "CRE",
+                                   TRUE ~ "genic"))
+
+# merge with DEGs that got asigned nearest 436 peak
+GOA.te.deg <- GOA.te %>%
+  merge(DE.df.peaks.deg %>%
+          dplyr::filter(Timepoint == "d15") %>%
+          dplyr::select(ENSEMBL, symbol, genename, foldChange, diffExpr, is.436.peak.vicinity,
+                        peak.ID, dist.gene.tss2peak) %>% distinct, by = "peak.ID", all.x = T, all.y = F)
+head(GOA.te.deg)
+GOA.te.deg %>% dplyr::filter(diffExpr == "Yes") %>% pull(symbol) %>% unique() %>% print() # 34
+
+
+# what about going peak2gene
+anno <- ChIPseeker::annotatePeak(
+  GenomicRanges::makeGRangesFromDataFrame(DA.250.up),
+  TxDb = TxDb.Hsapiens.UCSC.hg19.knownGene::TxDb.Hsapiens.UCSC.hg19.knownGene,
+  annoDb = "org.Hs.eg.db",
+  tssRegion = c(-1000, 500) 
+) %>% 
+  as.data.frame()
+DA.250.up$ENSEMBL <- anno$ENSEMBL; 
+DA.250.up$distanceToTSS <- anno$distanceToTSS; 
+DA.250.up$SYMBOL <- anno$SYMBOL; 
+DA.250.up$GENENAME <- anno$GENENAME
+DA.250.up$annotation <- anno$annotation
+DA.250.up$annotation.v2 <- ifelse(grepl("Intron", DA.250.up$annotation), "Intron", 
+                           ifelse(grepl("3|5", DA.250.up$annotation), "Exon", 
+                           ifelse(grepl("Exon", DA.250.up$annotation), "Exon",
+                           ifelse(grepl("Downstream", DA.250.up$annotation), "Distal Intergenic",
+                           DA.250.up$annotation))))
+DA.250.up %>% dplyr::select(annotation.v2) %>% dplyr::count(annotation.v2) %>% print()
+
+# merge w degs
+DA.250.deg <- DA.250.up %>% dplyr::select(peak.ID, is.GOA, ENSEMBL, SYMBOL, GENENAME, distanceToTSS) %>% 
+  distinct() %>%
+  merge(DE.df.peaks.deg %>%
+          dplyr::filter(Timepoint == "d15") %>%
+          dplyr::select(foldChange, diffExpr, peak.ID) %>% distinct, by = "peak.ID", all.x = T, all.y = F)
+DA.250.deg %>% dplyr::filter(diffExpr == "Yes") %>% View() # 34 # 42
+
+# d15 peaks 
+d15.ctrl.436peak <- fread('C:/Users/dmilovan/Desktop/data/ATAC/intersect/d15_ctrl__436peaks.bed') %>%
+  setNames(c('chrom','start','end','chrom.436','start.436','end.436','peak.ID','score','overlap')) %>%
+  mutate(is.436peak.d15 = case_when(peak.ID != '.' ~ 'Yes', TRUE ~ NA)) %>%
+  merge(peaks436, by = 'peak.ID', all = T)
+
+# annotate the genomic features of the peaks
+peak436.atac.anno = 
+  d0d15peak.all %>%
+  dplyr::filter(peak.ID != '.') %>% 
+  dplyr::select(chrom, start, end, peak.ID) %>%
+  GenomicRanges::makeGRangesFromDataFrame(.,
+                                          keep.extra.columns = TRUE,
+                                          ignore.strand = TRUE,
+                                          seqinfo = NULL,
+                                          seqnames.field = "chrom",
+                                          start.field = "start",
+                                          end.field = "end",
+                                          starts.in.df.are.0based = FALSE,
+                                          na.rm = TRUE) %>%
+  ChIPseeker::annotatePeak(.,
+                           annoDb = annoDb,
+                           TxDb = txdb,
+                           tssRegion = c(-1000, 1000)) %>%
+  as.data.frame() %>%
+  dplyr::mutate(annotation.v2 = dplyr::case_when(grepl("Intron", annotation) ~ "Intron",
+                                                 grepl("3|5", annotation) ~ "Exon",
+                                                 grepl("Exon", annotation) ~ "Exon",
+                                                 TRUE ~ annotation))
+
+#plot where the regions are
+peaks436.atac.anno.plot <- peak436.atac.annot %>% 
+  dplyr::select(peak.ID, annotation.v2) %>% 
+  dplyr::filter(peak.ID != '.') %>% 
+  distinct(peak.ID, .keep_all = TRUE) %>% 
+  dplyr::count(annotation.v2) %>%  
+  mutate(perc = n / sum(n) * 100) %>%  
+  ggplot(aes(x = "", y = perc, fill = annotation.v2)) +  
+  geom_bar(stat = "identity", width = 1) +  
+  geom_text(aes(label = n), position = position_stack(vjust = 0.5)) + 
+  theme_bw() +
+  theme(axis.text = element_blank(),  
+        axis.ticks = element_blank(), 
+        panel.grid = element_blank(), 
+        aspect.ratio = 1) 
+
+
+
 
 
