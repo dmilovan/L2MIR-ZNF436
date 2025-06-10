@@ -1,4 +1,14 @@
+# Cut&TAG
 
+# bash
+# 01 - data processing 
+bigWigAverageOverBed <in.bw> 202501_250DA-up-d15-436peaks.bed <C:/Users/dmilovan/Desktop/data/CaT_kd/quant/out.tab>
+
+
+############################################################################################################################
+
+# R 
+# 02 - data processing and plotting
 # histone mark signal on ZNF436 GOA peaks
 hmark.quant.path <- "C:/Users/dmilovan/Desktop/data/CaT_kd/quant/"
 
@@ -20,9 +30,6 @@ hmark <- map_dfr(seq_len(nrow(hmark.quant.info)), function(i) {
     )
 })
 
-head(hmark)
-View(hmark)
-colnames(hmark)
 
 # calculate fold change and p-value per histone mark
 hmark.stats <- hmark %>%
@@ -39,15 +46,9 @@ hmark.stats <- hmark %>%
     .groups = "drop"
   )
 
-# Add significance adjustment for multiple testing
-hmark.stats <- hmark.stats %>%
-  mutate(p.value.adj = p.adjust(p.value, method = "BH"))
-View(hmark.stats)
-
 # read all 436 peaks
 peaks436 <- fread('C:/Users/dmilovan/Documents/MY_DATA/DM_desk/human/2009_chipseq_PRJNA307573/beds/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80.bed') %>%
   setNames(c('chrom','start','end','peak.ID','peak.score'))
-head(peaks436)
 
 hmark.stats.436 <- full_join(hmark.stats, peaks436 %>% dplyr::select(-peak.score), by = 'peak.ID')
 hmark.stats.436$coord <- paste0(hmark.stats.436$chrom,':',
@@ -56,27 +57,8 @@ hmark.stats.436$coord <- paste0(hmark.stats.436$chrom,':',
 hmark.stats.436$log2fc <- log2(hmark.stats.436$fc.kdVSctrl)
 
 
-###########
-# PLTS
-hmark.stats.436.fc.dens.plot <-
-  hmark.stats.436 %>% 
-  ggplot(aes(x = log2fc)) +
-  geom_density() +
-  facet_wrap(.~hmark)
-hmark.stats.436.fc.dens.plot 
-# majority don't change the signal; normal dist of fc centered on 0 (fc = 1)
-
-hmark.stats.436 %>%
-  dplyr::filter(hmark == 'k4me3', fc.kdVSctrl < 0.67, p.value < 0.05) %>%
-  nrow() 
-# K4me1: 18 lose, 60 gain for fc.2; 30 lose, 99 gain for fc.1.5
-# K27ac: 38 lose, 47 gain for fc.2; 46 lose, 68 gain for fc.1.5
-# k4me3: 15 lose, 45 gain for fc.2; 17 lose, 75 gain for fc.1.5
-
-#####################
-head(hmark.stats.436)
-
 head(DA.250.up) # is defined by the ATAC-seq code part 
+# choose only GOA regions to focus on
 hmark.stats.436.DA <- hmark.stats.436 %>%
   group_by(peak.ID, hmark) %>%
   mutate(k4me1.dirChange = case_when(hmark == 'k4me1' & fc.kdVSctrl > 1.5 & p.value < 0.05 ~ 'up',
@@ -96,13 +78,8 @@ hmark.stats.436.DA <- hmark.stats.436 %>%
                                   TRUE ~ 'Yes')) %>% 
   mutate(is.DA = case_when(peak.ID %in% DA.250.up$peak.ID ~ 'Yes',
                            TRUE ~ 'No'))
-
-View(hmark.stats.436.DA)
-# save this table for the 
 hmark.stats.436.DA %>%
   fwrite()
-head(hmark.stats.436.DA)
-
 
 GOA.hmark <- hmark.stats.436.DA %>%
   dplyr::filter(is.DA == 'Yes') 
@@ -128,20 +105,15 @@ hmark.250DA.violin <- hmark.stats.436.DA %>%
   stat_compare_means(paired = T) +
   facet_wrap(.~hmark, scales = "free")
 hmark.250DA.violin 
-ggsave('C:/Users/dmilovan/Desktop/data/CaT_kd/plots/202504_436peaks-of-250GOA_hmark_boxviolinplot.pdf')
 
+#############################################################################################################################
 
-```
-
-
-
-# tissue specificity
-# data extraction and quantification 
+# R
+# 03 - data extraction and quantification of histone mark signal count on TEs
 # the objective is to treat TE integrants as genes, and histone mark signal as a rna-seq coverage;
-# the data is not processed anew form fasta reads, rather it's directly downloaded encode .bw signal fold change over ctrl 
-```{r}
+# the data is not processed anew from fasta reads, rather it's directly downloaded encode .bw signal fold change over ctrl 
+# the code is for all files, all hmarks, but in the manuscript, we used only the H3K27ac-based quantification results 
 ## singularity run docker://registry.c4science.ch/lvg/r-4.2.1:v3
-### find DE (differentially bound peaks)
 
 ###################################################
 ### 0. parameters
@@ -292,27 +264,23 @@ for (histone in unique(meta.sel$Experiment.target)) {
   write.csv(cbind(ereinfo, countTable.sel), file = paste0("../results/pileups/", histone, "_mean_foldChange_vs_control.csv"), quote = F)
 }
 
-```
 
+###############################################################################################################################
 
-# computing relative specificity
-```{r}
-# ENCODE H3K27ac signa on TEs for 76 tissues 
+# R
+# 04 - computing relative tissue specificity
+# ENCODE H3K27ac signal on TEs for 76 tissues 
 h3k27ac <- fread('Z:/danica/2408_chipseq_encode_counts/results/pileups/H3K27ac_mean_foldChange_vs_control.csv')
-nrow(h3k27ac) # 909 919
-ncol(h3k27ac) # 76 
 
 # load w znf436 binding info 
 h3k27ac.TE.436peak <- fread('C:/Users/dmilovan/Desktop/X/int-lvl/data/h3k27ac-TE_436peaks.bed') %>%
   setNames(c('chrom.TE','start.TE','end.TE','TE','coord.TE',
              'chr.436','start.436','end.436','peak.ID','score.436','overlap')) %>%
   dplyr::select(-c(chr.436,start.436,end.436,score.436,overlap))
-nrow(h3k27ac.TE.436peak) # 909 920
-head(h3k27ac.TE.436peak)
 h3k27ac.TE.436peak %>% 
   dplyr::select(c(1:3,5)) %>% distinct() %>%
   fwrite('C:/Users/dmilovan/Desktop/X/int-lvl/202501_436peaks_TEintegrants.bed',
-                              sep = "\t", quote = FALSE, col.names = FALSE)
+                              sep = "\t", quote = FALSE, col.names = FALSE) # this table is given in the sup
 
 # merge to get both the 436 binding info and the signal in tissues 
 h3k27ac.TE.436peak.full <- merge(h3k27ac.TE.436peak, 
@@ -320,63 +288,17 @@ h3k27ac.TE.436peak.full <- merge(h3k27ac.TE.436peak,
                                    dplyr::select(-c(chr,start,end,name)) %>% 
                                    dplyr::rename(coord.TE=V1), 
                                  by = 'coord.TE')
-nrow(h3k27ac.TE.436peak.full) # 909 920
-head(h3k27ac.TE.436peak.full)
 h3k27ac.TE.436peak.full.clean <- h3k27ac.TE.436peak.full %>%
   dplyr::filter(peak.ID != '.')
-nrow(h3k27ac.TE.436peak.full.clean) # 3712
-head(h3k27ac.TE.436peak.full.clean)
-colnames(h3k27ac.TE.436peak.full.clean)
-
-input_data <- h3k27ac.TE.436peak.full.clean %>% 
-  dplyr::filter(TE %in% L2MIR) %>% 
-  dplyr::select(-c(2:10)) %>% 
-  distinct(coord.TE, .keep_all = TRUE) %>% 
-  column_to_rownames('coord.TE') %>%
-  dplyr::select(where(is.numeric)) %>%  # Keep only numeric columns
-  dplyr::filter(rowSums(across(everything(), ~ replace_na(., 0))) > 0) %>%  # Remove rows where all values are 0 or NA
-  as.matrix()
-head(input_data)
-
-# redo with seed 
-set.seed(1604)
-l2mir.436.umap <- uwot::umap(
-    input_data,
-    n_neighbors = 10,
-    metric = "euclidean",
-    n_threads = parallel::detectCores() - 1  # Speed up by using all but 1 core
-)
-
-head(l2mir.436.umap)
-l2mir.436.umap.full <- l2mir.436.umap %>%
-  as.data.frame() %>%
-  setNames(c("UMAP1","UMAP2")) %>% 
-  rownames_to_column("coord.TE") %>% 
-  merge(h3k27ac.TE.436peak.full.clean, by = "coord.TE", all.x = T, all.y = F)
-head(l2mir.436.umap.full) 
-
-l2mir.436.umap.full %>%
-  arrange(H3K27ac_body_of_pancreas) %>%
-  ggplot(aes(x = UMAP1, y = UMAP2, color = H3K27ac_body_of_pancreas)) +
-  geom_point(size = 2, alpha = 0.5, stroke = 0) +
-  scale_color_gradient(low = "white", high = "sienna4") +
-  theme_bw() +
-  theme(aspect.ratio = 1)
-ggsave("C:/Users/dmilovan/Desktop/X/int-lvl/202404_L2MIR-bound-436_H3K27ac_body_of_pancreas.pdf")
-```
 
 # specificity scoring
-```{r}
-# make matrix for normalization
-input_data <- h3k27ac.TE.436peak.full.clean %>%  # Remove duplicates based on 'coord.TE'
+input_data <- h3k27ac.TE.436peak.full.clean %>% 
   dplyr::select(-c(2:10)) %>% 
   distinct(coord.TE, .keep_all = TRUE) %>% 
   column_to_rownames('coord.TE') %>%
-  dplyr::select(where(is.numeric)) %>%  # Keep only numeric columns
-  dplyr::filter(rowSums(across(everything(), ~ replace_na(., 0))) > 0) %>%  # Remove rows where all values are 0 or NA
+  dplyr::select(where(is.numeric)) %>%  
+  dplyr::filter(rowSums(across(everything(), ~ replace_na(., 0))) > 0) %>% 
   as.matrix()
-nrow(input_data) # 3711
-head(input_data)
 
 # simple z-scoring over rows, where a row is a TE integrant
 z_scores <- apply(input_data, 1, function(row) {
@@ -384,15 +306,11 @@ z_scores <- apply(input_data, 1, function(row) {
   row_sd <- sd(row, na.rm = TRUE)
   return((row - row_mean) / row_sd)
 })
-
 # transpose to get a matrix with z-scores for each column, meaning for each tissue
 z_scores <- t(z_scores)
-head(z_scores)
 
 # maximum absolute Z-score across tissues identifies the tissue where the TE integrant has the highest relative enrichment
 specificity_scores <- apply(abs(z_scores), 1, max)
-head(specificity_scores)
-View(specificity_scores)
 
 # scaling the specificity scores to a 0–1 range ensures that values are interpretable and comparable across TE integrants
 Z_min <- min(specificity_scores)
@@ -400,51 +318,11 @@ Z_max <- max(specificity_scores)
 
 # relative normalization: push the distribution between [0, 1]
 spec_scores <- (specificity_scores - Z_min) / (Z_max - Z_min)
-head(spec_scores)
-plot(density(spec_scores))
 spec.scores.df <- as.data.frame(spec_scores) %>% setNames(c('specificity.score')) 
 spec.scores.df$coord.TE <- rownames(spec.scores.df)
-head(spec.scores.df)
-nrow(spec.scores.df)
 
 # merge relative specificity
 h3k27ac.TE.436.spec.scores <- merge(h3k27ac.TE.436peak.full.clean, spec.scores.df, by = 'coord.TE')
-colnames(h3k27ac.TE.436.spec.scores)
-nrow(h3k27ac.TE.436.spec.scores) # 3712
-View(h3k27ac.TE.436.spec.scores)
-View(h3k27ac.TE.436.spec.scores %>% dplyr::select(c(1:6, specificity.score)))
-h3k27ac.TE.436.spec.scores %>%
-  fwrite('C:/Users/dmilovan/Desktop/X/int-lvl/data/202501_h3k27ac-TE-436-spec-scores.csv')
-
-# plotting
-score.plot <- h3k27ac.TE.436.spec.scores %>%
-  mutate(TEfam = ifelse(grepl('L2', `class/fam`), 'L2', ifelse(grepl('MIR', `class/fam`), 'MIR', 'other')),
-         coord.TE = fct_reorder(coord.TE, specificity.score, .desc = TRUE)) %>%
-  mutate(is.250.DA = case_when(peak.ID %in% DA.250.up ~ 'Yes',
-                               TRUE ~ 'No')) %>% 
-  arrange(desc(specificity.score)) %>%
-  mutate(is_top10 = row_number() <= ceiling(0.1 * n())) %>%
-  ggplot(aes(x = coord.TE, y = specificity.score, fill = TEfam, alpha = is_top10)) +
-  geom_bar(stat = 'identity') +
-  geom_vline(xintercept = ceiling(0.1 * nrow(h3k27ac.TE.436.spec.scores)) + 0.5, linetype = "dashed", color = "red") +
-  scale_alpha_manual(values = c(`TRUE` = 1, `FALSE` = 0.5)) +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
-# label whether they are 250 UP DA
-score.plot <- h3k27ac.TE.436.spec.scores %>%
-  mutate(is.250.DA = case_when(peak.ID %in% DA.250.up ~ 'Yes',
-                               TRUE ~ 'No')) %>% 
-  arrange(desc(specificity.score)) %>%
-  ggplot(aes(x = coord.TE, y = 1, fill = is.250.DA)) +
-  geom_bar(stat = 'identity') +
-  geom_vline(xintercept = ceiling(0.1 * nrow(h3k27ac.TE.436.spec.scores)) + 0.5, linetype = "dashed", color = "red") +
-  scale_alpha_manual(values = c(`TRUE` = 1, `FALSE` = 0.5)) +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
-score.plot
-pdf('C:/Users/dmilovan/Desktop/X/int-lvl/202501_h3k27ac-encode_436peaks-l2mir_specificity-score_plot_label250.pdf', width = 100)
-score.plot
-dev.off()
 
 # Q: what is the 10% cut off value? 0.6770092
 h3k27ac.TE.436.spec.scores %>%
@@ -452,15 +330,13 @@ h3k27ac.TE.436.spec.scores %>%
   dplyr::slice(ceiling(0.1 * n())) %>%
   pull(specificity.score)
 
-
 # pick only the 250 regions hat sig gain accessibility and do the scoreplot only on those
 # MACS_peak_752 is VISTA enh
-# MACS_peak_1962 is ectopic enh (tent4b)
+# MACS_peak_1962 is ectopic enh close to tent4b gene
 h3k27ac.TE.436.spec.scores %>% 
   dplyr::filter(peak.ID == 'MACS_peak_752') %>% View()
 h3k27ac.TE.436.spec.scores %>% 
   dplyr::filter(peak.ID == 'MACS_peak_1962') %>% View()
-
 
 score.plot.250DA <- h3k27ac.TE.436.spec.scores[,!c(11:77)] %>% 
   dplyr::filter(peak.ID %in% DA.250.up) %>% View()
@@ -471,31 +347,28 @@ score.plot.250DA <- h3k27ac.TE.436.spec.scores[,!c(11:77)] %>%
   geom_bar(stat = 'identity') +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
-score.plot.250DA
-pdf('C:/Users/dmilovan/Desktop/X/int-lvl/202501_h3k27ac-encode_436peaks-l2mir_specificity-score_plot_250DAgain.pdf', width = 100)
-score.plot.250DA
-dev.off()
 
+###############################################################################################################################
 
-head(h3k27ac.TE.436.spec.scores)
-View(h3k27ac.TE.436.spec.scores)
-colnames(h3k27ac.TE.436.spec.scores)
-h3k27ac.TE.436.spec.scores.plot <- h3k27ac.TE.436.spec.scores %>%
-  dplyr::filter(peak.ID != '.') %>% 
-  group_by(peak.ID) %>% 
-  summarise(
-    specificity.score.mean = mean(specificity.score, na.rm = TRUE),
-    across(c(11:77), ~ mean(.x, na.rm = TRUE)) # Replace with desired handling for other columns
-  ) %>%
-  mutate(peak.ID = fct_reorder(peak.ID, specificity.score.mean, .desc = TRUE)) %>%
-  ggplot(aes(x = peak.ID, y = specificity.score.mean)) +
-  geom_bar(stat = 'identity') 
+# R
+# 05 - L2MIR integrant analysis
 
-# L2MIR integrant analysis
-# compute signal of k27ac from my data on 436-l2mir ints - to be projected on the umap
-```{r}
-# project my k27ac data from cm ctrl vs. 436 kd
-# load k27ac signal data
+# create a UMAP
+set.seed(1604)
+l2mir.436.umap <- uwot::umap(
+    input_data, # previously defined in specificity scoring part
+    n_neighbors = 10,
+    metric = "euclidean",
+    n_threads = parallel::detectCores() - 1  
+)
+
+l2mir.436.umap.full <- l2mir.436.umap %>%
+  as.data.frame() %>%
+  setNames(c("UMAP1","UMAP2")) %>% 
+  rownames_to_column("coord.TE") %>% 
+  merge(h3k27ac.TE.436peak.full.clean, by = "coord.TE", all.x = T, all.y = F)
+
+# quantification of k27ac over all l2/mir ints from my H3K27ac cut and tag using bigwig average over bed
 dir <- "C:/Users/dmilovan/Desktop/X/int-lvl/quant/"
 files <- list.files(path = dir, pattern = "\\.tab$", full.names = TRUE)
 
@@ -514,103 +387,37 @@ data <- files %>%
   }) %>%
   bind_rows() %>%
   select(-c(size, covered, sum))  # Optionally remove unwanted columns
-
-# View the resulting data
-head(data)
-View(data)
-
-levels(as.factor(data$condition))
-
 setDT(data)
-
-# Calculate mean for each condition across replicates, grouped by coord.TE
 data.new <- data[, .(
   mean.ctrl = mean(mean[condition == "ctrl"], na.rm = TRUE),
   mean.kd = mean(mean[condition == "kd"], na.rm = TRUE)
 ), by = .(coord.TE)]
 
-head(data.new)
-View(data.new)
-```
-
-
-```{r}
 l2mir.436.umap.full.v2 <- l2mir.436.umap.full %>%
   merge(data.new, by = "coord.TE", all.x = T, all.y = F) %>%
   mutate(
     mean.ctrl = replace(mean.ctrl, is.na(mean.ctrl) | is.nan(mean.ctrl), 0),
     mean.kd = replace(mean.kd, is.na(mean.kd) | is.nan(mean.kd), 0)
   )
-head(l2mir.436.umap.full.v2)
-nrow(l2mir.436.umap.full.v2) # 2884
-colnames(l2mir.436.umap.full.v2)
-
 l2mir.436.umap.full.v2 <- l2mir.436.umap.full.v2 %>%
   mutate(mean.fc.KDvsCtrl = mean.kd / mean.ctrl)
-
-# to label GOA regions
-head(DA.250.up)
-View(DA.250.up)
-head(l2mir.436.umap.full.v2)
-
+# label GOA
 l2mir.436.umap.full.v2 <- l2mir.436.umap.full.v2 %>%
   mutate(is.GOA = case_when(peak.ID %in% DA.250.up$peak.ID ~ 'Yes',
                                TRUE ~ 'No'))
-levels(as.factor(l2mir.436.umap.full.v2$is.GOA))
-
 l2mir.436.umap.full.v2 %>% 
-  fwrite("C:/Users/dmilovan/Desktop/X/int-lvl/202404_L2MIR-436bound_UMAP.csv")
-head(l2mir.436.umap.full.v2)
+  fwrite("C:/Users/dmilovan/Desktop/X/int-lvl/202404_L2MIR-436bound_UMAP.csv") # this table is given in sup
 
-l2mir.436.umap.full.v2 <- fread("C:/Users/dmilovan/Desktop/X/int-lvl/202404_L2MIR-436bound_UMAP.csv")
-head(l2mir.436.umap.full.v2)
-
-
-# testing projections of different info
-# a. diff subfams do not stratify - as expected - epigenetic assimilation 
-# b. GOA regions go to a specific tissue - as expected, No
+# projected info plots
+# projecting GOA
 p.GOA <- l2mir.436.umap.full.v2 %>%
   ggplot(aes(x = UMAP1, y = UMAP2, color = is.GOA)) +
   geom_point(alpha = 0.3, size = 3, stroke = 0) +
   # scale_color_continuous(low = "white", high = "darkred", na.value = "white") +  # Set NA values to white
   theme_bw() +
   theme(aspect.ratio = 1)
-p.GOA
-ggsave("C:/Users/dmilovan/Desktop/X/int-lvl/202504_l2mir-436-k27ac_GOA.pdf")
-# c. are the regions promoters or enhancers??
-# c.1: label all TEs based on gen feature overlap
-l2mir.436bound <- l2mir.436.umap.full.v2 %>% dplyr::select(chrom.TE,start.TE,end.TE,TE,peak.ID,coord.TE) %>%
-  distinct() %>% 
-  GenomicRanges::makeGRangesFromDataFrame(seqnames.field = "chrom.TE",
-                                          start.field = "start.TE",
-                                          end.field = "end.TE",
-                                          keep.extra.columns = TRUE) %>% 
-  ChIPseeker::annotatePeak(
-    TxDb = TxDb.Hsapiens.UCSC.hg19.knownGene::TxDb.Hsapiens.UCSC.hg19.knownGene,
-    annoDb = "org.Hs.eg.db",
-    tssRegion = c(-1000, 500) # this should be updated elsewhere as well
-  ) %>%
-  as.data.frame() %>% 
-  mutate(annotation.v2 = case_when(grepl("Intron", annotation) ~ "Intron",
-                                   grepl("3|5", annotation) ~ "Exon",
-                                   grepl("Exon", annotation) ~ "Exon",
-                                   grepl("Downstream", annotation) ~ "Distal Intergenic",
-                                   TRUE ~ annotation)) %>%
-  mutate(annotation.v3 = case_when(annotation.v2 == "Promoter" ~ "Promoter",
-                                   TRUE ~ "dist.CRE"))
-head(l2mir.436bound)
-l2mir.436bound %>% dplyr::select(annotation.v3) %>% dplyr::count(annotation.v3)
-l2mir.436.umap.full.v2 <- l2mir.436.umap.full.v2 %>%
-  left_join(l2mir.436bound %>% dplyr::select(coord.TE, annotation.v2, annotation.v3, ENSEMBL, SYMBOL), by = "coord.TE")
-p.anno <- l2mir.436.umap.full.v2 %>%
-  mutate(color.label = ifelse(is.GOA == "Yes", annotation.v3, NA)) %>%
-  ggplot(aes(x = UMAP1, y = UMAP2, color = c(color.label))) +
-  geom_point(alpha = 0.3, size = 3, stroke = 0) +
-  theme_bw() +
-  theme(aspect.ratio = 1)
-p.anno
-ggsave("C:/Users/dmilovan/Desktop/X/int-lvl/202504_l2mir-436-k27ac_GOA-anno.pdf")
-# d. fc. kd vs ctrl from my k27ac signal
+
+# projecting fc. kd vs ctrl from my k27ac cut and tag signal
 p.fc <- l2mir.436.umap.full.v2 %>%
   #arrange(log2(mean.fc.KDvsCtrl)) %>%
   ggplot(aes(x = UMAP1, y = UMAP2, color = log2(mean.fc.KDvsCtrl))) +
@@ -623,64 +430,26 @@ p.fc <- l2mir.436.umap.full.v2 %>%
   ) +
   theme_bw() +
   theme(aspect.ratio = 1)
-p.fc
-ggsave(paste0("C:/Users/dmilovan/Desktop/X/int-lvl/202504_l2mir-436-k27ac_fcKDvsCtrl.pdf"), plot = p.fc)
 
-###
-# e.
-# is GOA associated to a DEG going up?
+# projecting associated DEG FC
 # data from fig 3 with asigning the peak to a deg, up to a max of 500 kb
 head(DE.df.peaks.deg)
 DEG.pick <- DE.df.peaks.deg %>%
   dplyr::filter(Timepoint == 'd15') %>%
   dplyr::select(ENSEMBL,log2.fc,FC.direction,diffExpr,is.436.peak.vicinity)
-
 # add the DEG info 
 l2mir.436.umap.full.v2.short <- l2mir.436.umap.full.v2 %>% 
   dplyr::select(coord.TE,UMAP1,UMAP2,chrom.TE,start.TE,end.TE,TE,peak.ID,score,strand,`class/fam`,unmerged,
                 mean.ctrl,mean.kd,mean.fc.KDvsCtrl,is.GOA,annotation.v2,annotation.v3,ENSEMBL,SYMBOL) %>%
   left_join(DEG.pick, by = "ENSEMBL") 
-head(l2mir.436.umap.full.v2.short)
-p.deg <- l2mir.436.umap.full.v2.short %>%
-  left_join(DE.df.peaks.deg %>%
-              dplyr::filter(Timepoint == 'd15') %>%
-              dplyr::select(ENSEMBL,diffExpr), by = "ENSEMBL") %>%
-  dplyr::select(UMAP1,UMAP2,TE,coord.TE,is.GOA,annotation.v3,SYMBOL,diffExpr,log2.fc,FC.direction,
-                is.436.peak.vicinity) %>% 
-  mutate(color.label = case_when(diffExpr == "Yes" & is.GOA == "Yes" & FC.direction == "Up" & annotation.v3 == "Promoter" ~ "GOA.DEGup.prom",
-                                 diffExpr == "Yes" & is.GOA == "Yes" & FC.direction == "Up" & annotation.v3 == "dist.CRE" ~ "GOA.DEGup.enh",
-                                 diffExpr == "Yes" & is.GOA == "Yes" & FC.direction == "Down" & annotation.v3 == "Promoter" ~ "GOA.DEGdown.prom",
-                                 diffExpr == "Yes" & is.GOA == "Yes" & FC.direction == "Down" & annotation.v3 == "dist.CRE" ~ "GOA.DEGdown.enh",
-                                 TRUE ~ "other")) %>% 
-  ggplot(aes(x = UMAP1, y = UMAP2, color = c(color.label))) +
-  geom_point(alpha = 0.3, size = 3, stroke = 0) +
-  theme_bw() +
-  theme(aspect.ratio = 1)
-p.deg
-ggsave("C:/Users/dmilovan/Desktop/X/int-lvl/202504_l2mir-436-k27ac_GOA-deg.pdf")
 
-# UMAP1,UMAP2,TE,coord.TE,
-l2mir.436.umap.full.v2 %>%
-  dplyr::select(is.GOA,annotation.v3,SYMBOL,diffExpr,log2.fc,FC.direction,
-                is.436.peak.vicinity) %>% 
-  dplyr::filter(is.436.peak.vicinity == "Yes") %>% distinct() %>%
-  mutate(color.label = case_when(is.GOA == "Yes" & FC.direction == "Up" & annotation.v3 == "Promoter" ~ "GOA.DEGup.prom",
-                                 is.GOA == "Yes" & FC.direction == "Up" & annotation.v3 == "dist.CRE" ~ "GOA.DEGup.enh",
-                                 is.GOA == "Yes" & FC.direction == "Down" & annotation.v3 == "Promoter" ~ "GOA.DEGdown.prom",
-                                 is.GOA == "Yes" & FC.direction == "Down" & annotation.v3 == "dist.CRE" ~ "GOA.DEGdown.enh",
-                                 TRUE ~ "other")) %>% 
-  dplyr::filter(color.label != "other") %>% View()
-
-
-# f. DEG lvls
+# DEG lvls
 degToPlot <- l2mir.436.umap.full.v2.short %>%
   left_join(DE.df.peaks.deg %>%
               dplyr::filter(Timepoint == 'd15') %>%
               dplyr::select(ENSEMBL), by = "ENSEMBL") %>%
   dplyr::select(UMAP1, UMAP2, SYMBOL, log2.fc, diffExpr, is.436.peak.vicinity) %>%
   mutate(color.label = ifelse(diffExpr == "Yes" & is.436.peak.vicinity == "Yes", log2.fc, NA))
-head(degToPlot)
-View(degToPlot)
 
 l2mir.436.umap.full.v2.short %>%
   left_join(DE.df.peaks.deg %>%
@@ -706,40 +475,7 @@ p.deg.fc <- degToPlot %>%
       #             aes(x = UMAP1, y = UMAP2, label = SYMBOL)) +
   theme_bw() +
   theme(aspect.ratio = 1)
-p.deg.fc
-ggsave("C:/Users/dmilovan/Desktop/X/int-lvl/202505_l2mir-436-k27ac_GOA-deg-fc-new.pdf")
 
-```
-
-
-
-```{r}
-# iterate through all the tissues
-for (col_name in colnames(l2mir.436.umap.full.v2)) {
-  if (startsWith(col_name, "H3K27ac")) {
-    # Create the plot for the current column
-    p <- ggplot(l2mir.436.umap.full.v2, aes(x = UMAP1, y = UMAP2, color = .data[[col_name]])) +
-      geom_point(size = 3, alpha = 0.3) +
-      scale_color_gradient(low = "grey90", high = "darkred") +  # Apply color gradient
-      theme_bw() +
-      theme(aspect.ratio = 1) +
-      labs(color = col_name)
-    
-    # Save the plot as a PDF for each H3K27ac column
-    ggsave(paste0("C:/Users/dmilovan/Desktop/X/int-lvl/umap/202504_l2mir-436-k27ac_", col_name, ".pdf"), 
-           plot = p, width = 8, height = 6)
-  }
-}
-
-
-# combine all into 1 pdf file for easier exploration
-pdf_folder <- "C:/Users/dmilovan/Desktop/X/int-lvl/umap/"
-pdf_files <- list.files(pdf_folder, pattern = "*.pdf", full.names = TRUE)
-output_pdf <- "C:/Users/dmilovan/Desktop/X/int-lvl/202504_l2mir-436-k27ac.pdf"
-qpdf::pdf_combine(pdf_files, output_pdf)
-
-
-# manual coloring of the picked tissues to match the manuscript
 # pancreas
 p.pancreas <- l2mir.436.umap.full.v2 %>%
   arrange(H3K27ac_endocrine_pancreas) %>%
@@ -750,19 +486,6 @@ p.pancreas <- l2mir.436.umap.full.v2 %>%
                   vjust = -1, hjust = -1) +
   theme_bw() +
   theme(aspect.ratio = 1) 
-p.pancreas    
-ggsave(paste0("C:/Users/dmilovan/Desktop/X/int-lvl/umap/202504_l2mir-436-k27ac_endocrine_pancreas_ManualColor.pdf"), plot = p.pancreas)
-
-# brain
-p.brain <- l2mir.436.umap.full.v2 %>% 
-  arrange(H3K27ac_layer_of_hippocampus) %>%
-  ggplot(aes(x = UMAP1, y = UMAP2, color = H3K27ac_layer_of_hippocampus)) +
-  geom_point(alpha = 0.3) +
-  scale_color_gradient(low = "grey90", high = "blue4") +  # Apply color gradient
-  theme_bw() +
-  theme(aspect.ratio = 1) 
-p.brain
-ggsave(paste0("C:/Users/dmilovan/Desktop/X/int-lvl/umap/202504_l2mir-436-k27ac_layer_of_hippocampus_ManualColor.pdf"), plot = p.brain)
 
 # small intestine - THEMIS2
 p.intestine <- l2mir.436.umap.full.v2 %>% 
@@ -792,13 +515,13 @@ p.angularGyrus <- l2mir.436.umap.full.v2 %>%
 p.angularGyrus
 ggsave(paste0("C:/Users/dmilovan/Desktop/X/int-lvl/umap/202504_l2mir-436-k27ac_angular-gyrus_ManualColor.pdf"), plot = p.angularGyrus)
 
+# examples
 # coord.TE: chr10:79938463-79938615: MIRb_hs2223
 h3k27ac.TE.436.spec.scores %>% 
   dplyr::filter(peak.ID == 'MACS_peak_752') %>% View()
 # coord.TE: chr16:50180614-50180991: L2a
 h3k27ac.TE.436.spec.scores %>% 
   dplyr::filter(peak.ID == 'MACS_peak_1962') %>% View()
-
 examples <- c("chr10:79938463-79938615","chr16:50180614-50180991")
 # label 2 specific examples
 p.examples <- l2mir.436.umap.full.v2 %>%
