@@ -1,4 +1,15 @@
-# code for generating Figure 1, S1 code
+# R libraries
+library(data.table)
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+library(viridis)
+library(ggrepel)
+library(gplots)
+library(umap)
+library(RColorBrewer)
+library(philentropy)
+library(phylobase)
 
 # external data links:
 # ENCODE histone marks:
