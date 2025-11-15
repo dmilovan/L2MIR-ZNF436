@@ -1,0 +1,32 @@
+sample,condition,,Area,Mean,Min,Max
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - g9-9,kd,1,3842.646,11.761,0,76
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - g9-11,kd,2,530.871,46.448,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - g9-10,kd,3,1038.064,104.821,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - g9-8 - cell1,kd,4,723.481,37.602,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - g9-8 - cell2,kd,5,545.794,35.534,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - g9-7,kd,6,1315.04,71.08,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - g9-6,kd,7,918.677,21.973,0,131
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - g9-5,kd,8,2028.373,55.284,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - g9-4,kd,9,1221.918,59.93,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - g9-3,kd,10,1339.912,111.269,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - g9-2,kd,11,2720.216,69.74,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - g9-1,kd,12,1427.86,53.652,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-25,ctrl,13,3500.604,21.886,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-24,ctrl,14,3252.679,92.952,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-23,ctrl,15,5272.495,49.787,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-22,ctrl,16,5339.749,23.085,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-21,ctrl,17,2473.484,126.351,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-1,ctrl,18,1487.752,150.691,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-19,ctrl,19,1815.467,138.527,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-18,ctrl,20,1880.931,111.073,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-17,ctrl,21,3458.023,97.431,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-16,ctrl,22,1881.527,116.608,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-15,ctrl,23,3978.149,66.501,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-9,ctrl,24,1040.451,159.753,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-7 - cell1,ctrl,25,4417.889,86.539,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-7 - cell2,ctrl,26,1531.726,104.326,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-6,ctrl,27,2104.581,81.694,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-5,ctrl,28,10024.665,53.998,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-4 - cell1,ctrl,29,3684.658,19.573,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-4 - cell2,ctrl,30,5172.211,31.945,0,255
+MAX_C2-20251011_d15-cm-tnnt2-ctrl-kd.lif - or1-1,ctrl,31,2108.759,145.488,0,255
