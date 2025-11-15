@@ -1,6 +1,7 @@
 # R
 # 01 - single cell fetal expression, bulk human heart dev expression and cm diff expression - external datasets download and plotting
 # CT.Exp is the sup file from: GSE156793_S6_gene_expression_celltype Cao, et al. 2022 sc-RNA seq fetal expression
+CT.Exp <- fread("GSE156793_S6_gene_expression_celltype.csv")
 CT.Exp <- CT.Exp %>%
   group_by(ENSEMBL) %>%
   mutate(
@@ -60,7 +61,7 @@ CT.Exp %>%
   guides(fill="none") + theme(aspect.ratio=4) 
 
 # human heart dev - bulk RNA-seq Cardoso-Moreira, et al. 2019
-h <- as.data.frame(fread('U:/Team LVG/Danica/MY_DATA/DM_desk/evo/2019_CardosoMoreiraM_dev/Human.CPM.txt'))
+h <- as.data.frame(fread('Human.CPM.txt'))
 # subsetting for organ-spec data
 h.ensembl <- as.data.frame(h$V1)
 h.heart <- cbind(h.ensembl, h[,grepl("Heart", names(h))])
@@ -115,9 +116,9 @@ l.p <- ggplot(l.genes, aes(x = variable, y = value, group = ensembl)) +
     ylab('CPM')
 
 
-# data is from PRJNA480492 cardiac diff expression CPM
+# data is from PRJNA480492 cardiac diff expression CPM - Zhang et al. 2019
 hum.RNAseq.CM = 
-  data.table::fread("U:/Team LVG/Danica/MY_DATA/LVG_data/Olga/ZNF436project/4-Cardiac_diff_PRJNA480492/PRJNA480492_CPM_cardiacDiff_gene.xls") %>%
+  data.table::fread("PRJNA480492_CPM_cardiacDiff_gene.xls") %>%
   pivot_longer(cols=5:16, values_to = "CPM") %>%
   separate(name, c("Day", "Rep"), sep = "_") %>%
   mutate(Day = gsub("X", "", Day), 
@@ -158,15 +159,12 @@ hum.RNAseq.CM %>%
   theme_bw() + theme(aspect.ratio=0.8)
 
 ################################################################################################################################################################################
-# R
+# informative for the preprocessing of the transcriptomic data analysis
 # 02 - Count table processing from RNA-seq
-
 #singularity run docker://registry.c4science.ch/lvg/r-4.2.1:v2
-
 ###################################################
 ### global vars and load libs
 ###################################################
-
 pwd <- unlist(strsplit(sub(".*projects/", "", getwd()), "/"))
 who <- pwd[1]; project <- pwd[2]
 server <- c('fidis', 'helvetios', 'alfred')[3]
@@ -175,11 +173,9 @@ mc.cores <- 4
 make.design <- c('auto', 'onlyGroup', 'dummy')[1]
 library(colorout)
 source('~/scripts/R/common/commonFuns.R') # this code is LVG go to code; for details, see other Trono lab publications, such as 
-
 ###################################################
 ### create dirs, import and preprocess
 ###################################################
-
 buildDirs()
 if (server=='alfred') {
     getQClocal(hero, who, project)
@@ -193,24 +189,20 @@ if (server=='alfred') {
 }
 preprocessCntsGene(make.design=make.design, org=org, annoWithBiomart=FALSE)
 if (length(unique((getSeqLengths())))!=1) stop('The sequence length is not the same across all samples!')
-
 ###################################################
 ### plots after batch correction in each group
 ###################################################
-
 load('../data/RData/countTable_gene.RData')
 load('../data/RData/genes.libSize.RData')
 Time <- as.factor(sinfo$Time)
 Time <- factor(Time, levels=c('t0', 't8', 't15'))
 mydircreate('../results/gene/figs/ManualAdj')
-
 #adjust
 design <- model.matrix(~ -1 + Group + Time + Batch + Group * Batch)
 fit1 <- lmFit(v, design)
 idx <- grepl('Batch', colnames(design))
 subs <- coef(fit1)[, idx, drop=F] %*% t(design[, idx, drop=F])  
 norm.counts.adj <- norm.counts - subs
-
 #export table
 norm_vals <- 2^(norm.counts.adj)*genes.avg.norm
 norm_vals[countTable==0] <- 0
@@ -219,139 +211,13 @@ xout_vals <- data.frame(anno, norm_vals)
 write.table(xout_vals, file='../results/gene/tables/norm_vals_adj.xls', row.names=F,
             col.names=T, quote=F, sep='\t')
 
-
-###################################################
+################################################################################################################################
 ### diffExp
-###################################################
-
-# in wt compare respect to previous time #
-##########################################
-
-dummy <- load('../data/RData/countTable_gene.RData')
-load('../data/RData/genes.libSize.RData')
-Time <- as.factor(sinfo$Time)
-Time <- factor(Time, levels=c('t0', 't8', 't15'))
-
-#select wt
-selc <- Group=='wt'
-countTable <- countTable[, selc]
-norm.counts <- norm.counts[, selc]
-norm.counts.adj <- norm.counts.adj[, selc]
-v <- v[, selc]
-#Group <- as.factor(Group[selc])
-Batch <- Batch[selc]
-sinfo <- sinfo[selc, ]
-Group <- Time[selc]
-
-##run contrasts
-contrast <- list(c('t15', 't8'), c('t8', 't0')) 
-for (i in 1:length(contrast)) {
-    cat(paste('\nContrast ', i, ': ', paste(unlist(contrast[i]), collapse=' vs '), '\n', sep=''))
-    compDiffExp(countTable=countTable, norm.counts=norm.counts, norm.counts.adj=norm.counts.adj,
-                Group=Group, Batch=Batch, v=v, genes.avg.norm=genes.avg.norm, contrast=contrast[[i]],
-                pval.threshold=.05, fc.threshold=2, path.out='../results/gene/tables_wtSamples', org=org, padj=F)
-}
-DEsummary(file='../results/gene/tables_wtSamples/summary_DE.txt', DE.path='../results/gene/tables_wtSamples')
-#geneOntology(DE.path='../results/gene/tables/', org=org)
-## gsea(DE.path='../results/gene/tables/', B=10000, org=org, mc.cores=1)
-#\end{rbatch}
-
-# in empty compare respect to previous time #
-#############################################
-
-dummy <- load('../data/RData/countTable_gene.RData')
-load('../data/RData/genes.libSize.RData')
-Time <- as.factor(sinfo$Time)
-Time <- factor(Time, levels=c('t0', 't8', 't15'))
-
-#select empty
-selc <- Group=='empty'
-countTable <- countTable[, selc]
-norm.counts <- norm.counts[, selc]
-norm.counts.adj <- norm.counts.adj[, selc]
-v <- v[, selc]
-#Group <- as.factor(Group[selc])
-Batch <- Batch[selc]
-sinfo <- sinfo[selc, ]
-Group <- Time[selc]
-
-##run contrasts
-contrast <- list(c('t15', 't8'), c('t8', 't0')) 
-for (i in 1:length(contrast)) {
-    cat(paste('\nContrast ', i, ': ', paste(unlist(contrast[i]), collapse=' vs '), '\n', sep=''))
-    compDiffExp(countTable=countTable, norm.counts=norm.counts, norm.counts.adj=norm.counts.adj,
-                Group=Group, Batch=Batch, v=v, genes.avg.norm=genes.avg.norm, contrast=contrast[[i]],
-                pval.threshold=.05, fc.threshold=2, path.out='../results/gene/tables_emptySamples', org=org, padj=F)
-}
-DEsummary(file='../results/gene/tables_emptySamples/summary_DE.txt', DE.path='../results/gene/tables_emptySamples')
-#geneOntology(DE.path='../results/gene/tables/', org=org)
-## gsea(DE.path='../results/gene/tables/', B=10000, org=org, mc.cores=1)
-#\end{rbatch}
-
-# in each timepoint compare groups #
-####################################
-
-#load
-dummy <- load('../data/RData/countTable_gene.RData')
-load('../data/RData/genes.libSize.RData')
-Time <- as.factor(sinfo$Time)
-Time <- factor(Time, levels=c('t0', 't8', 't15'))
-
-#model it all
-design <- model.matrix(~ -1 + Group + Time + Batch + Group * Time + Group * Batch)
-fit1 <- lmFit(v, design)
-#labels               1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15
-contrasts <- cbind(c( 1, 0,-1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), #t0. empty vs wt
-                   c( 1, 0,-1, 0, 0, 0, 0, 0,-1, 0, 0, 0, 0, 0, 0), #t8. empty vs wt
-                   c( 1, 0,-1, 0, 0, 0, 0, 0, 0, 0,-1, 0, 0, 0, 0), #t15. empty vs wt
-                   c( 0, 1,-1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), #t0. g9 vs wt
-                   c( 0, 1,-1, 0, 0, 0, 0, 1,-1, 0, 0, 0, 0, 0, 0), #t8. g9 vs wt
-                   c( 0, 1,-1, 0, 0, 0, 0, 0, 0, 1,-1, 0, 0, 0, 0), #t15. g9 vs wt
-                   c(-1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), #t0. g9 vs empty
-                   c(-1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0), #t8. g9 vs empty
-                   c(-1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0)) #t15. g9 vs empty
-fit2 <- contrasts.fit(fit1, contrasts)
-fit3 <- eBayes(fit2, trend=T)
-anno <- annotateEns(rownames(norm.counts), org, level='gene')
-
-#build ouput
-foldChange <- eb.fold(fit3)[, seq(1, ncol(contrasts) *3, by=3)]
-contrasts.p <- ifelse(contrasts!=1, 0, 1)
-contrasts.n <- ifelse(contrasts!=(-1), 0, 1)
-mean1 <- 2^(coef(fit1) %*% contrasts.p) * genes.avg.norm
-mean2 <- 2^(coef(fit1) %*% contrasts.n) * genes.avg.norm
-pvalue <- fit3$p.value
-padj <- apply(pvalue, 2, function(x) p.adjust(x, 'BH'))
-
-#export tables
-names1 <- paste0('mean.', rep(c('t0', 't8', 't15'), times=3), '.', rep(c('empty', 'g9', 'g9'), each=3))
-names2 <- paste0('mean.', rep(c('t0', 't8', 't15'), times=3), '.', rep(c('wt', 'wt', 'empty'), each=3))
-
-for (i in 1:ncol(contrasts)) {
-    xout <- data.frame(anno, mean1[, i], mean2[, i], foldChange=foldChange[, i], pval=pvalue[, i], padj=padj[, i])
-    colnames(xout)[5] <- names1[i]
-    colnames(xout)[6] <- names2[i]
-    xout$diffExpr <- ifelse(abs(xout$foldChange)>2 & xout$pval<.05, 'Yes', 'No')
-    xout <- xout[order(xout$pval), ]
-    file <- paste0('../results/gene/tables/DE_', gsub('mean.', '', names1[i]), '_vs_', gsub('mean.', '', names2[i]), '.xls')
-    write.table(xout, file=file, row.names=F, col.names=T, quote=F, sep='\t')
-}
-
-################################################################################################################################################################################
 # R
-# 03 - my experiment
-
+# 03 - gene expression d15 cm ctrl vs. kd
 # var
 condition_colors <- c("g9" = "purple4", "e" = "gray")
-
-# # table cpm 
-cpm <- fread('C:/Users/dmilovan/Desktop/data/CM_kd/CPM.xls')
-colnames(cpm) <- c('ensembl','entrez','symbol','genename','D0_e_r1','D0_e_r2','D0_e_r3','D0_g9_r1','D0_g9_r2','D0_g9_r3',
-                   'D0_wt_r1','D0_wt_r2','D0_wt_r3','D15_e_r1','D15_e_r2','D15_e_r3','D15_g9_r1','D15_g9_r2','D15_g9_r3',
-                   'D15_wt_r1','D15_wt_r2','D15_wt_r3','D8_e_r1','D8_e_r2','D8_e_r3','D8_g9_r1','D8_g9_r2','D8_g9_r3',
-                   'D8_wt_r1','D8_wt_r2','D8_wt_r3')
-# getting the wt out of the further data analysis
-cpm.c <- cpm[,-c(11:13,29:31,20:22)]
+cpm.c <- fread(("supplementary_data/CPM_CMdiff_d0d8d15_ctrl-kd.csv")
 pick <- c('ZNF436',"CD7","THEMIS2")
 c.m.test <- cpm.c[cpm.c$symbol %in% pick,] 
 t.m <- c.m.test %>% 
@@ -375,13 +241,9 @@ genes <- t.p %>%
 # These would be used as symbols to label
 TF.cmDiff.markers <- c('TBX5','GATA4','MEF2C','TNNT2')
 pick2 <- c("CD7","THEMIS2")
-structural.PPI = c("MYL2", "MYH11", "MYL3", "MYL4", "MYH7B", "MYO18B", 
-                   "ACTC1", "MYH6", "MYH7", "TNNI1", "TMOD1", "TNNC1", 
-                   "TCAP", "TTN", "ACTN2", "DES")
-symbolsToLabel
 
 # DIFFERENTIAL GENE EXPRESSION
-de.15 <- fread('C:/Users/dmilovan/Documents/MY_DATA/DM_desk/human/2303_rnaseq_timcourse_znf436_kd/results/gene/tables/DE_t15.g9_vs_t15.empty.xls')
+de.15 <- fread('supplementary_data/DE_t15.g9_vs_t15.empty.xls')
 de.15 <- de.15 %>% mutate(gene_type = case_when(   
   foldChange >= 2 & pval <= 0.05 ~ "up", # change it to pval if padj doesn't work, just to get an idea on the gene expression trend
   foldChange <= -2 & pval <= 0.05 ~ "down",
@@ -400,34 +262,9 @@ de.15.volplot <- ggplot(de.15, aes(x = sign(foldChange)*log2(abs(foldChange)), y
   theme_bw() +
   theme(aspect.ratio = 1, axis.title = element_text(size = 20)) 
 
-DE.df = data.frame(de.15)
-# annotate diff genes with closest peak
-# annotation file from batcave to retrieve TSS coordinates 
-fread("/Users/rosspopoff/Dropbox/Trono_Lab/1-datasets/0-Ressource_annotation/1812_hg19_ens_all_genes_tss.bed") %>%
-  stats::setNames(c("gene.tss.chr", "gene.tss.start", "gene.tss.end", 
-                    "ENSEMBL", "gene.tss.score","gene.tss.strand")) %>%
-  dplyr::select(gene.tss.chr, gene.tss.start,gene.tss.end, ENSEMBL) %>%
-  dplyr::filter(ENSEMBL %in% DE.df.ensID) %>%
-  write.table("/Users/rosspopoff/Dropbox/Trono_Lab/40-L2M_Dana/5-ZNF436KD/ZNF436KD_genes_tss_coo.bed",
-              row.names = F, col.names = F, quote = F, sep ="\t")
-
-# sort files 
-system(paste0(
-  "sort -k1,1 -k2,2n /Users/rosspopoff/Dropbox/Trono_Lab/40-L2M_Dana/5-ZNF436KD/ZNF436KD_genes_tss_coo.bed ",
-  "> /Users/rosspopoff/Dropbox/Trono_Lab/40-L2M_Dana/5-ZNF436KD/ZNF436KD_genes_tss_coo_sorted.bed"))
-
-system(paste0(
-  "sort -k1,1 -k2,2n /Users/rosspopoff/Dropbox/Trono_Lab/40-L2M_Dana/2-ChIP-seq/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80.bed ",
-  "> /Users/rosspopoff/Dropbox/Trono_Lab/40-L2M_Dana/5-ZNF436KD/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80_sorted.bed"))
-# closestBed 
-system(paste0(
-  "/Users/rosspopoff/anaconda3/bin/closestBed -d ",
-  "-a /Users/rosspopoff/Dropbox/Trono_Lab/40-L2M_Dana/5-ZNF436KD/ZNF436KD_genes_tss_coo_sorted.bed ",
-  "-b /Users/rosspopoff/Dropbox/Trono_Lab/40-L2M_Dana/5-ZNF436KD/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80_sorted.bed ",
-  "> /Users/rosspopoff/Dropbox/Trono_Lab/40-L2M_Dana/5-ZNF436KD/ZNF436KD_genes_tss_coo_nearest_peaks.bed"))
-
+# nearest ZNF436 peak asscoaiated based on the distance to TSS 
 DE.df.peaks = 
-  fread("U:/Team LVG/Danica/MY_DATA/LVG_data/Olga/ZNF436project/5-ZNF436KD/ZNF436KD_genes_tss_coo_nearest_peaks.bed") %>%
+  fread("supplementary_data/ZNF436KD_genes_tss_coo_nearest_peaks.bed") %>%
   stats::setNames(c("gene.tss.chr", "gene.tss.start", "gene.tss.end", "ENSEMBL", 
                     "peak.chr", "peak.start", "peak.end", "peak.ID","peak.score",
                     "dist.gene.tss2peak")) %>%
@@ -469,7 +306,18 @@ wilcox.test(dist.gene.tss2peak ~ FC.direction, data = DE.df.peaks.deg %>%
 # cluster profiler: GO and GSEA
 library(org.Hs.eg.db, include.only = c("org.Hs.eg.db"))
 library(clusterProfiler)
-
+load("supplementary_data/Fig3_df_hum.RNAseq.KD.bound.Rdata")
+structural.PPI = c("MYL2", "MYH11", "MYL3", "MYL4", "MYH7B", "MYO18B", 
+                   "ACTC1", "MYH6", "MYH7", "TNNI1", "TMOD1", "TNNC1", 
+                   "TCAP", "TTN", "ACTN2", "DES")
+hum.RNAseq.KD.bound = 
+  DE.df %>%
+  left_join(DE.df.peaks, by="ENSEMBL") %>%
+  mutate(is.structural.component = 
+           ifelse(symbol %in% structural.PPI, "Yes", "No"))
+hum.RNAseq.KD.bound <- hum.RNAseq.KD.bound %>%
+  mutate(is.436.peak.vicinity.v2 = case_when(dist.gene.tss2peak < 500000 ~ "Yes",
+                                             TRUE ~ "No"))
 hum.RNAseq.KD.bound %>%
   dplyr::filter(Timepoint =="d15" & diffExpr =="Yes" & entrez != "---") %>%
   pull(foldChange, name = "entrez") %>% 
@@ -495,10 +343,44 @@ d15.G0 %>%
   theme_bw() + xlim(0,0.1) +
   theme(aspect.ratio=2)
 
+################################################################################################################################################################################
+# 4 
+# Flow analysis - preprocessed ad FlowJo
+cc <- fread("vCM-3r_TNNTflow_c.csv")
+condition_colors <- c("g9" = "purple4", "or1" = "gray")
+c.box <- ggplot(cc, aes(x = condition, y = percentage, color = condition)) +
+  geom_boxplot() +
+  geom_point() +
+  theme_bw() +
+  theme(aspect.ratio = 1) +
+  stat_compare_means(method = 't.test') +
+  scale_color_manual(values = condition_colors) 
+
+# TNNT2-stained cardiomyocytes were analyzed using Fiji ImageJ 
+# cell area was manually defined based on the TNNT2 staining
+# R
+stain <- fread("supplementary_data/20251020_new-staining_TNNT2_new-quantification_max_intensity.csv")
+head(stain)
+# plot intensity per area
+stain %>%
+  mutate(MeanPerArea = Mean / Area) %>%
+  ggplot(aes(x = condition, y = MeanPerArea, color = condition)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 1) +
+  stat_compare_means(method = "t.test")
+# plot area
+stain %>%
+  ggplot(aes(x = condition, y = Area, color = condition)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 1) +
+  stat_compare_means(method = "t.test")
+
 
 ################################################################################################################################################################################
 # python
-# 04 - beating frequency
+# 05 - beating frequency
 # singularity run docker://registry.c4science.ch/lvg/pyenv:v4
 conda  activate image
 ipython  --no-autoindent
@@ -525,6 +407,7 @@ dt = 0.12  # time between frames in sec
 
 frame_range = 200
 
+# this data is deposited on zenodo: https://doi.org/10.5281/zenodo.17297599
 images_dir = '/mnt/svfas6/Team LVG/Danica/MY_DATA/DM_bench/CM_beat/2024_v2_5x5_scale/'
 method = "sum"
 output_dir = f'../results/{method}'
@@ -685,12 +568,11 @@ for filename in os.listdir(images_dir):
     all_freq_df = pd.DataFrame(all_freq)
     all_freq_df.to_csv("../results/all_frequencies_patch.csv")
 
-################################################################################################################################################################################
 # R
 # 05 - beating frequency
 # patch frequencies - python results from jduc
 
-beat <- fread("Y:/danica/2408_beatit/results/all_frequencies_patch.csv")
+beat <- fread("supplementary_data/all_frequencies_patch.csv")
 head(beat)
 beat <- beat %>%
   mutate(condition = case_when(grepl("or1", file) ~ "ctrl",
@@ -721,12 +603,10 @@ beat.plot <- ggplot(beat.summary, aes(x = condition, y = mean.freq)) +
   geom_jitter() +
   geom_stat_mean()
 
-
-
-
-#########################################################
+########################################################################################################################################
 # R
-# 05 - Expression of ZNF436 KD DEGs in Fetal tissue
+# 06 - Expression of ZNF436 KD DEGs in Fetal tissue
+# DE.df.peaks.deg - previously defined, section 3
 de.d15 <- DE.df.peaks.deg %>%
   dplyr::filter(Timepoint == "d15") %>%
   dplyr::select(ENSEMBL, symbol, genename, mean.KDg9, mean.Emp, foldChange, pval, diffExpr, FC.direction) %>%
