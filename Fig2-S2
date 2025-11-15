@@ -1,11 +1,22 @@
+# R libraries
+library(data.table)
+library(tidyverse)
+library(matrixStats) # masked by dplyr from tidyverse
+library(ggpubr)
+library(viridis)
+library(ggrepel)
+library(gplots)
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+library(BSgenome.Hsapiens.UCSC.hg19)
+library(TxDb.Mmusculus.UCSC.mm9.knownGene)
+organism = "org.Hs.eg.db"
+library(organism, character.only = TRUE)
+
 # R
 # 01 - L2/MIR KZFP binders
-
-kzfp.bs.me <- fread('Y:/danica/2402_kzfp_encodeHistone/results/pyTEnrich_res_noSCAN_allZNF.csv')
-c <- kzfp.bs.me
+c <- fread('supplementary_data/pyTEnrich_res_noSCAN_allZNF.csv')
 c$kzfp <- gsub("^.*_(Z[A-Za-z0-9]+?)(HA)?(_|$).*", "\\1", c$ZNF)
 c$kzfp <- sub("_.*", "", c$kzfp)
-levels(as.factor(c$kzfp))
 c <- c[c$ZNF != 'TEnoKZNF',]
 c <- c[c$kzfp != 'AC115220',]
 
@@ -21,8 +32,6 @@ c.capped %>%
 te.z.c <- te.z[,1:3]
 colnames(te.z.c) <- c('TEFam','subfam_name','class')
 c.capped.c <- merge(c.capped, te.z.c, by = 'subfam_name', all.x = T, all.y = F, allow.cartesian = TRUE)
-head(c.capped.c)
-
 all <- c.capped.c %>%
   dplyr::filter(padj.final < 0.05) %>%
   dplyr::select(subfam_name, kzfp, class, TEFam) %>%
@@ -47,10 +56,9 @@ primary <- c.capped.c %>%
 combined.l2mir <- full_join(all, primary, by = c("subfam_name", "kzfp", "class", "TEFam")) %>%
   mutate(count.primary = replace_na(count.primary, 0)) %>%
   dplyr::filter(subfam_name %in% L2MIR)
-View(combined.l2mir)
 
 # age of kzfps - this data is in more deteiled discussed in previous Trono lab publications, e.g. de Tribolet-hardy, et al. 2023
-kzfp.age <- fread('U:/Team LVG/Danica/MY_DATA/LVG_data/resources/human/LVG/KRAB_GRCh37-hg19_KRAB_age.csv')
+kzfp.age <- fread('supplementary_data/KRAB_GRCh37-hg19_KRAB_age.csv')
 kzfp.age.c <- kzfp.age[,1:2]
 colnames(kzfp.age.c) <- c('kzfp','age')
 
@@ -58,13 +66,10 @@ c.age <- left_join(c, kzfp.age.c, by = 'kzfp')
 L2MIRbinders <- c.age[c.age$subfam_name %in% L2MIR,]
 L2MIRbinders.c <- L2MIRbinders[L2MIRbinders$padj.final < 0.05,] # sig for at least one subfam
 L2MIRbinders.ccc <- L2MIRbinders.cc[!is.na(L2MIRbinders.cc$age),]
-levels(as.factor(L2MIRbinders.ccc$kzfp)) 
-length(unique(L2MIRbinders.ccc$kzfp))# 23
 
 # limit to p-val to display as dot transparency
 L2MIRbinders.ccc <- L2MIRbinders.ccc %>%
   mutate(padj.final = ifelse(padj.final == 0, 1e-300, padj.final))
-
 dotplot <- ggplot(L2MIRbinders.ccc, aes(x = subfam_name, y = reorder(kzfp, age))) + 
   geom_point(aes(alpha = -log10(padj.final), size = fc.expected), color = 'darkcyan', position = position_dodge()) +
   xlab('L2/MIR subfamily') +
@@ -72,11 +77,9 @@ dotplot <- ggplot(L2MIRbinders.ccc, aes(x = subfam_name, y = reorder(kzfp, age))
   theme_bw() +
   theme(axis.title = element_text(size = 20), axis.text = element_text(size = 15), axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
 
-
 ###################################################################################################################################################################################
 # R
 # 02 - dn/ds
-
 # for more detail on how dn/ds was computed check Matsushima, et al. 2025
 # here is visual representation for ZNF436 
 dnds.436 <- fread('U:/Team LVG/Danica/MY_DATA/LVG_data/Wayo/ZNF436_GeneID-80818_dnds_anno.xls')
@@ -94,18 +97,37 @@ dnds.436.plot <- dnds.436 %>%
 ###################################################################################################################################################################################
 # bash
 # 03 - pyTEnrich plotting of TE subfam enrichment for ZNF436 and Zfp46
+python3 pyTEnrich -i supplementary_data/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80.bed -o ZNF436_pyTEnrich/
+python3 pyTEnrich -i supplementary_data/Zfp46.good_vs_F9_Input.good_peaks_macs80.bed -o Zfp46_pyTEnrich/
 
+Hs.436 <- fread('supplementary_data/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80_summary_SUBFAM.tsv')
+colnames(Hs.436) <- c('TEsubFam', colnames(Hs.436[,2:ncol(Hs.436)])) 
+p.Hs.436 <- ggplot(Hs.436[Hs.436$n_i > Hs.436$expected & Hs.436$n_i > 1,], aes(x = TEsubFam)) +
+  geom_bar(aes(y = n_i, fill = "n_i"), stat = "identity", alpha = 0.8) +
+  geom_bar(aes(y = expected, fill = "expected"), stat = "identity") +
+  geom_text(aes(label = significance, y = expected + n_i), position = position_stack(vjust = 0.8)) +
+  scale_fill_manual(name = "Variable", values = c("expected" = "grey", "n_i" = "orange")) +
+  labs(y = "number of peaks") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, size = 10)) 
 
-
-
+Mm.46 <- fread('supplementary_data/Zfp46.good_vs_F9_Input.good_peaks_macs80_summary_SUBFAM.tsv')
+colnames(Mm.46) <- c('TEsubFam', colnames(Mm.46[,2:ncol(Mm.46)])) 
+p.Mm.46 <- ggplot(Mm.46[Mm.46$n_i > Mm.46$expected & Mm.46$n_i > 1,], aes(x = TEsubFam)) +
+  geom_bar(aes(y = n_i, fill = "n_i"), stat = "identity", alpha = 0.8) +
+  geom_bar(aes(y = expected, fill = "expected"), stat = "identity") +
+  geom_text(aes(label = significance, y = expected + n_i), position = position_stack(vjust = 0.8)) +
+  scale_fill_manual(name = "Variable", values = c("expected" = "grey", "n_i" = "orange")) +
+  labs(y = "number of peaks") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, size = 10)) 
 
 #################################################################################################################################################################################
 # R
 # 04 - human and mouse enrichment representation
 
 # HUMAN PEAKS
-L2M.hum.436.peaks = 
-  data.table::fread("U:/Team LVG/Danica/MY_DATA/LVG_data/Olga/ZNF436project/2-ChIP-seq/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80_AllTE.bed") %>%
+L2M.hum.436.peaks <- fread("supplementary_data/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80_AllTE.bed") %>%
   stats::setNames(c("peak.chr", "peak.start", "peak.end","peak.ID", 
                     "peak.score","TE.chr", "TE.start", "TE.end", "TE.ID", 
                     "TE.score", "TE.strand", "TE.fam", "TE.sfam", "peak.overlap")) %>%
@@ -128,16 +150,13 @@ L2M.hum.436.peaks.filt =
                   is.duplicated.peak == TRUE & grepl("L2b|L2c|MIRb",TE.fam)) %>% 
   mutate(TE.fam.v2 = ifelse(grepl("Alu|MIR|L2|No\\.TE", TE.fam), 
                             TE.fam, "Other.TE"))  
-nrow(L2M.hum.436.peaks.filt) # 3 216 
-# 3216 peaks are overlapping TEs, the rest not; 
+
 # combine with all
-All.hum.436peaks = 
-  data.table::fread("C:/Users/dmilovan/Documents/MY_DATA/DM_desk/human/2009_chipseq_PRJNA307573/beds/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80.bed") %>%
+All.hum.436peaks <- fread("supplementary_data/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80.bed") %>%
   stats::setNames(c("peak.chr", "peak.start", "peak.end","peak.ID", "peak.score")) %>%
   left_join(L2M.hum.436.peaks.filt, by="peak.ID") %>%
   mutate_at(c("TE.ID", "TE.fam", "TE.sfam", "TE.fam.v2"),
             function(x) replace_na(x, "No.TE"))
-nrow(All.hum.436peaks) # 3633
 
 # annotate the genomic features of 436 peaks
 txdb <- TxDb.Hsapiens.UCSC.hg19.knownGene
@@ -188,8 +207,7 @@ All.hum.436peaks.annot %>%
 
 ################
 # MOUSE PEAKS
-L2M.mm9 = 
-  data.table::fread("U:/Team LVG/Danica/MY_DATA/LVG_data/Olga/ZNF436project/2-ChIP-seq/Zfp46.good_vs_F9_Input.good_peaks_macs80_mm9_TEs_zfp46-bound.bed") %>%
+L2M.mm9 <- fread("supplementary_data/Zfp46.good_vs_F9_Input.good_peaks_macs80_mm9_TEs_zfp46-bound.bed") %>%
   stats::setNames(c("TE.chr", "TE.start", "TE.end", "TE.sfam", 
                     "TE.score", "TE.strand", "TE.fam",
                     "peak.chr", "peak.start", "peak.end",
@@ -199,7 +217,6 @@ L2M.mm9 =
          is.max.overlap = ifelse(peak.overlap==max.overlap, 
                                  "Yes", "No")) %>%
   ungroup() %>% as.data.frame()
-nrow(L2M.mm9) # 1 326
 
 L2M.mm9.filt = 
   L2M.mm9 %>% 
@@ -209,11 +226,7 @@ L2M.mm9.filt =
   mutate(is.duplicated.peak = duplicated(peak.ID)) %>%
   dplyr::filter(is.duplicated.peak == FALSE | is.duplicated.peak == TRUE & TE.fam %in% c("MIR", "L2b"))
 
-nrow(L2M.mm9.filt) # 733 overlapping TEs
-View(L2M.mm9.filt)
-
-All.mus.46peaks = 
-  data.table::fread("U:/Team LVG/Danica/MY_DATA/LVG_data/Olga/ZNF436project/2-ChIP-seq/Zfp46.good_vs_F9_Input.good_peaks_macs80.bed") %>%
+All.mus.46peaks <- fread("supplementary_data/Zfp46.good_vs_F9_Input.good_peaks_macs80.bed") %>%
   stats::setNames(c("peak.chr", "peak.start", "peak.end",
                     "peak.ID", "peak.score")) %>%
   left_join(L2M.mm9.filt, by="peak.ID") %>%
@@ -222,8 +235,6 @@ All.mus.46peaks =
   mutate(TE.fam.v2 = ifelse(grepl("B2|B4", TE.fam), "Rod.SINE", TE.fam)) %>%
   mutate(TE.fam.v2 = ifelse(grepl("Alu|MIR|L2|Rod.SINE|No\\.TE", TE.fam.v2), 
                             TE.fam.v2, "Other.TE"))
-nrow(All.mus.46peaks) # 1 585 - this is the number of peaks
-View(All.mus.46peaks)
 
 TxDbmm9 <- TxDb.Mmusculus.UCSC.mm9.knownGene
 annodbmm9 <- "org.Mm.eg.db"
@@ -248,11 +259,6 @@ All.mus.46peaks.annot =
                          ifelse(grepl("Exon", annotation), "Exon",
                                 ifelse(grepl("Downstream", annotation), "Distal Intergenic",
                                        annotation)))))
-nrow(All.mus.46peaks.annot) # 1 585
-head(All.mus.46peaks.annot, 10)
-View(All.mus.46peaks.annot)
-levels(as.factor(All.mus.46peaks.annot$annotation.v2))
-
 
 # subset only for the peaks associating with L2/MIRs
 All.mus.46peaks.annot %>% 
@@ -283,11 +289,8 @@ All.mus.46peaks.annot %>%
 # 05 -secondary targets
 
 # HUMAN
-All.hum.sec.target <- fread('F:/bioinfo/2009_ZNF436chip/hg19_TEs__ZNF436macs80.bed')
-head(All.hum.sec.target)
-colnames(All.hum.sec.target) <- c("TE.chr","TE.start","TE.end","TE.sfam","TE.score","TE.strand","TE.fam","TE",
-                  "peak.chr","peak.start","peak.end","peak.ID","peak.score","overlap")
-All.hum.sec.target <- All.hum.sec.target %>%
+load('supplementary_data/Fig2_df_All.hum.436peaks.annot.2ndary.target.Rdata')
+All.hum.sec.target <- All.hum.436peaks.annot.2ndary.target %>%
   group_by(peak.ID) %>%
   mutate(max.overlap = max(overlap), 
          is.max.overlap = ifelse(overlap==max.overlap, 
@@ -302,15 +305,13 @@ All.hum.sec.target.filt =
   mutate(is.duplicated.peak = duplicated(peak.ID)) %>%
   dplyr::filter(is.duplicated.peak == FALSE | is.duplicated.peak == TRUE & TE.fam %in% c("MIR", "L2b")) # this part what is it for?
   
-All.hum.436peaks = 
-  data.table::fread("C:/Users/dmilovan/Documents/MY_DATA/DM_desk/human/2009_chipseq_PRJNA307573/beds/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80.bed") %>%
+All.hum.436peaks <- fread("supplementary_data/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80.bed") %>%
   stats::setNames(c("peak.chr", "peak.start", "peak.end","peak.ID", "peak.score")) %>%
   left_join(All.hum.sec.target.filt, by="peak.ID") %>%
   mutate(TE.fam = replace_na(TE.fam, "No.TE"),
          TE.sfam = replace_na(TE.sfam, "No.TE")) %>%
   mutate(TE.fam.v2 = ifelse(grepl("Alu|MIR|L2|No\\.TE", TE.fam), 
                             TE.fam, "Other.TE"))
-nrow(All.hum.436peaks) # 3633 
 
 All.hum.secTarget =
   All.hum.sec.target %>% 
@@ -318,8 +319,6 @@ All.hum.secTarget =
   group_by(peak.ID) %>%
   mutate(Secondary.target = paste0(TE.fam, collapse = "")) %>% 
   dplyr::select(peak.ID, Secondary.target) %>% unique()
-nrow(All.hum.secTarget) # 358
-length(unique(All.hum.secTarget$peak.ID))
 
 All.hum.436peaks.annot.2ndary.target = 
   All.hum.436peaks.annot %>% 
@@ -359,9 +358,6 @@ All.hum436.sec.target.plot <- All.hum.436peaks.annot.2ndary.target %>%
   geom_stratum() +
   geom_text(stat = "stratum", aes(label = after_stat(stratum))) +
   White_bg + theme(aspect.ratio=1)
-pdf('U:/Team LVG/Danica/MY_DATA/DM_desk/human/2009_chipseq_PRJNA307573/enrichment/202411_ZNF436_sec-target-alluvial.pdf')
-All.hum436.sec.target.plot
-dev.off()
 
 # proportions for the 2ndary targets and overlap w genomic features
 All.hum.436peaks.annot.2ndary.target %>%
@@ -387,8 +383,8 @@ All.hum.436peaks.annot.2ndary.target %>%
 
 # MOUSE
 # specific mouse subfamilies are manually curated as Rod.SINE in the publication, after checking the clade-specificity of a TE subfam on Dfam
-L2M.mm9.secTarget =
-  L2M.mm9 %>% 
+load("Fig2_df_All.mus.46peaks.annot.2ndary.target.Rdata")
+L2M.mm9.secTarget <- All.mus.46peaks.annot.2ndary.target %>% 
   dplyr::filter(is.max.overlap=="No") %>%
   group_by(peak.ID) %>%
   mutate(Secondary.target = paste0(TE.fam, collapse = "")) %>% 
@@ -449,8 +445,3 @@ All.mus.46peaks.annot.2ndary.target %>%
         axis.ticks = element_blank(),  # Remove axis ticks
         panel.grid = element_blank(),  # Remove grid lines
         aspect.ratio = 1)
-
-
-
-
-
