@@ -1,9 +1,26 @@
-# Cut&TAG
+# R libraries
+library(data.table)
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+library(viridisLite)
+library(viridis)
+library(ggrepel)
+library(gplots)
+library(pheatmap)
+library(reshape)
+library(umap)
+library(RColorBrewer)
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+library(BSgenome.Hsapiens.UCSC.hg19)
+library(TxDb.Mmusculus.UCSC.mm9.knownGene)
+organism = "org.Hs.eg.db"
+library(organism, character.only = TRUE)
 
+# Cut&TAG
 # bash
 # 01 - data processing 
-bigWigAverageOverBed <in.bw> 202501_250DA-up-d15-436peaks.bed <C:/Users/dmilovan/Desktop/data/CaT_kd/quant/out.tab>
-
+bigWigAverageOverBed <in.bw> 202501_250DA-up-d15-436peaks.bed <quant.tab>
 
 ############################################################################################################################
 
@@ -34,20 +51,14 @@ hmark <- map_dfr(seq_len(nrow(hmark.quant.info)), function(i) {
 # calculate fold change and p-value per histone mark
 hmark.stats <- hmark %>%
   group_by(peak.ID, hmark) %>%
-  summarise(
-    # Calculate mean signal for each condition
-    mean.ctrl = mean(mean[condition=="ctrl"], na.rm = TRUE), 
-    mean.kd = mean(mean[condition=="kd"], na.rm = TRUE),
-    # Calculate fold change
-    fc.kdVSctrl = mean.kd/mean.ctrl,
-    # Perform t-test between conditions
-    p.value = t.test(mean[condition == "ctrl"],
-                     mean[condition == "kd"])$p.value,
-    .groups = "drop"
-  )
+  summarise(mean.ctrl = mean(mean[condition=="ctrl"], na.rm = TRUE), 
+            mean.kd = mean(mean[condition=="kd"], na.rm = TRUE),
+            fc.kdVSctrl = mean.kd/mean.ctrl,
+            p.value = t.test(mean[condition == "ctrl"],
+                             mean[condition == "kd"])$p.value, .groups = "drop")
 
 # read all 436 peaks
-peaks436 <- fread('C:/Users/dmilovan/Documents/MY_DATA/DM_desk/human/2009_chipseq_PRJNA307573/beds/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80.bed') %>%
+peaks436 <- fread('supplementary_data/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80.bed') %>%
   setNames(c('chrom','start','end','peak.ID','peak.score'))
 
 hmark.stats.436 <- full_join(hmark.stats, peaks436 %>% dplyr::select(-peak.score), by = 'peak.ID')
@@ -56,8 +67,7 @@ hmark.stats.436$coord <- paste0(hmark.stats.436$chrom,':',
                                    hmark.stats.436$end)
 hmark.stats.436$log2fc <- log2(hmark.stats.436$fc.kdVSctrl)
 
-
-head(DA.250.up) # is defined by the ATAC-seq code part 
+head(DA.250.up) # is defined in section 4
 # choose only GOA regions to focus on
 hmark.stats.436.DA <- hmark.stats.436 %>%
   group_by(peak.ID, hmark) %>%
@@ -78,25 +88,21 @@ hmark.stats.436.DA <- hmark.stats.436 %>%
                                   TRUE ~ 'Yes')) %>% 
   mutate(is.DA = case_when(peak.ID %in% DA.250.up$peak.ID ~ 'Yes',
                            TRUE ~ 'No'))
-hmark.stats.436.DA %>%
-  fwrite()
 
 GOA.hmark <- hmark.stats.436.DA %>%
   dplyr::filter(is.DA == 'Yes') 
-View(GOA.hmark)
 
 hmark.250DA.violin <- hmark.stats.436.DA %>%
   dplyr::filter(is.DA == 'Yes') %>%
   dplyr::select(peak.ID, mean.ctrl, mean.kd, p.value, hmark) %>% 
+  # dplyr::filter(hmark = "<choose>")) +
   pivot_longer(
     cols = c(mean.ctrl, mean.kd), # Columns to pivot
     names_to = "condition",       # New column for the condition
     values_to = "mean"            # New column for the values
   ) %>% 
   mutate(condition = sub("mean\\.", "", condition)) %>% distinct() %>% 
-  # dplyr::filter(peak.ID %in% peak.ID.to.pick) %>% 
   ggplot(aes(x = condition, y = mean)) +
-  # geom_point(aes(color = is.k4me1.sig)) +
   geom_violin(fill = NA) +
   geom_boxplot(fill = NA, outlier.shape = NA) +
   theme_bw() +
@@ -104,10 +110,8 @@ hmark.250DA.violin <- hmark.stats.436.DA %>%
         aspect.ratio = 1) +
   stat_compare_means(paired = T) +
   facet_wrap(.~hmark, scales = "free")
-hmark.250DA.violin 
 
 #############################################################################################################################
-
 # R
 # 03 - data extraction and quantification of histone mark signal count on TEs
 # the objective is to treat TE integrants as genes, and histone mark signal as a rna-seq coverage;
@@ -118,7 +122,6 @@ hmark.250DA.violin
 ###################################################
 ### 0. parameters
 ###################################################
-
 pwd <- unlist(strsplit(sub(".*projects/", "", getwd()), "/"))
 who <- pwd[1]
 project <- pwd[2]
@@ -126,12 +129,10 @@ server <- c("fidis", "helvetios", "lvgsrv2")[3]
 org <- c("Hs", "Mm", "Mma", "Dr", "chm13")[1]
 hero <- "duc"
 source("~/scripts/R/common/commonFuns.R")
-
 ### VARIABLES
 fc.threshold <- 1.5
 pval.threshold <- 0.05
 mc.cores <- 2
-
 ###################################################
 ### 1. load  funs
 ###################################################
@@ -163,7 +164,6 @@ makeSampleInfo <- function(hero, who, project, server, path,
     stop(paste0(file.out, " already exists"))
   }
 }
-
 makeSampleInfo(hero, who, project, server,
   path = "/data/scratch/duc/danica/2408_chipseq_encode_counts/pileups/",
   lbl2remove = "_hg19_genes_TE_1709|_mm9_genes_TE_1902_s|_mm10_genes_TE_1809|_hg19_genes_TE_1811_s|_rheMac8_genes_TE_1908_s|_danRer11_genes_TE_1811_s",
@@ -171,16 +171,12 @@ makeSampleInfo(hero, who, project, server,
   file.out = "../data/sampleinfo.csv",
   pileup_name = "pileups"
 )
-
 meta <- read.csv("../data/metadata_bigwigs_encode_selection.txt", sep = "\t")
 sampleinfo <- read.csv("../data/sampleinfo.csv")
-
 meta.sel <- meta[, c("File.accession", "Biosample.term.name", "Experiment.target")]
 meta.sel$"Biosample.term.name" <- gsub(" ", "_", meta.sel$"Biosample.term.name")
 meta.sel$"Experiment.target" <- gsub("-human", "", meta.sel$"Experiment.target")
 meta.sel["name"] <- paste(meta.sel$Experiment.target, meta.sel$Biosample.term.name, sep = "_")
-
-
 ###################################################
 # 2. create dirs
 ###################################################
@@ -188,8 +184,6 @@ mydircreate(paste0("../results/"))
 mydircreate(paste0("../results/", "/tables"))
 mydircreate(paste0("../results/", "/tables_noAdj"))
 mydircreate(paste0("../results/", "/figs"))
-
-
 ###################################################
 ### 3. read and preprocess data
 ###################################################
@@ -200,10 +194,8 @@ countTable <- readPileup4bigData(
   HTSeqClean = F,
   keepFirstC = F
 )
-
 colnames(countTable) <- gsub(".bed", "", colnames(countTable))
 rownames(countTable) <- paste0(countTable[, 1], ":", countTable[, 2], "-", countTable[, 3])
-
 gc()
 sel <- apply(countTable, 1, function(x) {
   (sum(x[-1:-6] > 5)) > 3
@@ -214,26 +206,21 @@ gc()
 countTable <- countTable[sel, ]
 countTable <- as.matrix(countTable[, -1:-6])
 save(countTable, file = paste0("../data/rawData.RData"), compress = "gzip")
-
 sel <- apply(countTable, 1, function(x) {
   (sum(x > 5)) > 3
 })
-
 # annotate table and take the mean per group and remove low foldchange
 load(paste0("../data/rawData.RData"))
-
 ## get chrom counts, if not done on previous script
 # mypath <- paste0('/home/', hero, '/scratch/', who, '/', project, '/')
 # cmd <- paste0('scp -rv ', hero, '@', server, '.epfl.ch:', mypath, 'chrCounts ../data/')
 # err <- system(cmd)
-
 # load sinfo
 sinfo <- read.csv("../data/sampleinfo.csv", as.is = T)
 stopifnot(all(sinfo$sample == colnames(countTable)))
 o <- match(colnames(countTable), meta.sel$File.accession)
 meta.sel <- meta.sel[o, ]
 stopifnot(all(meta.sel$File.accession == colnames(countTable)))
-
 Group <- factor(meta.sel$name)
 design <- model.matrix(~ -1 + Group)
 # get norm.counts
@@ -244,7 +231,6 @@ design <- model.matrix(~ -1 + Group)
 # v <- voom(dge, design, plot = TRUE, lib.size = libSize)
 # fit1 <- lmFit(v[1:100, ], design)
 # means <- coef(fit1)
-
 countTable.means <- t(apply(countTable, 1, function(x) {
   coef(lm.fit(design, x))
 }))
@@ -255,7 +241,6 @@ ereinfo <- read.csv("~/samba/resources/data/ere/human/hg19/1811_hg19_TE_repmask_
 colnames(ereinfo) <- c("chr", "start", "end", "name", "score", "strand", "class/fam", "unmerged")
 rownames(ereinfo) <- paste0(ereinfo$chr, ":", ereinfo$start, "-", ereinfo$end)
 ereinfo <- ereinfo[rownames(countTable.means), ]
-
 # split per histone
 mydircreate("../results/pileups")
 for (histone in unique(meta.sel$Experiment.target)) {
@@ -263,17 +248,14 @@ for (histone in unique(meta.sel$Experiment.target)) {
   countTable.sel <- countTable.means[, sel]
   write.csv(cbind(ereinfo, countTable.sel), file = paste0("../results/pileups/", histone, "_mean_foldChange_vs_control.csv"), quote = F)
 }
-
-
 ###############################################################################################################################
-
 # R
 # 04 - computing relative tissue specificity
 # ENCODE H3K27ac signal on TEs for 76 tissues 
-h3k27ac <- fread('Z:/danica/2408_chipseq_encode_counts/results/pileups/H3K27ac_mean_foldChange_vs_control.csv')
+# h3k27ac file is direct output of upper section
 
 # load w znf436 binding info 
-h3k27ac.TE.436peak <- fread('C:/Users/dmilovan/Desktop/X/int-lvl/data/h3k27ac-TE_436peaks.bed') %>%
+h3k27ac.TE.436peak <- fread('supplementary_data/h3k27ac-TE_436peaks.bed') %>%
   setNames(c('chrom.TE','start.TE','end.TE','TE','coord.TE',
              'chr.436','start.436','end.436','peak.ID','score.436','overlap')) %>%
   dplyr::select(-c(chr.436,start.436,end.436,score.436,overlap))
@@ -291,6 +273,7 @@ h3k27ac.TE.436peak.full <- merge(h3k27ac.TE.436peak,
 h3k27ac.TE.436peak.full.clean <- h3k27ac.TE.436peak.full %>%
   dplyr::filter(peak.ID != '.')
 
+h3k27ac.TE.436peak.full.clean <- fread("supplementary_data/h3k27ac.TE.436peak.full.clean.csv")
 # specificity scoring
 input_data <- h3k27ac.TE.436peak.full.clean %>% 
   dplyr::select(-c(2:10)) %>% 
@@ -308,19 +291,15 @@ z_scores <- apply(input_data, 1, function(row) {
 })
 # transpose to get a matrix with z-scores for each column, meaning for each tissue
 z_scores <- t(z_scores)
-
 # maximum absolute Z-score across tissues identifies the tissue where the TE integrant has the highest relative enrichment
 specificity_scores <- apply(abs(z_scores), 1, max)
-
 # scaling the specificity scores to a 0–1 range ensures that values are interpretable and comparable across TE integrants
 Z_min <- min(specificity_scores)
 Z_max <- max(specificity_scores)
-
 # relative normalization: push the distribution between [0, 1]
 spec_scores <- (specificity_scores - Z_min) / (Z_max - Z_min)
 spec.scores.df <- as.data.frame(spec_scores) %>% setNames(c('specificity.score')) 
 spec.scores.df$coord.TE <- rownames(spec.scores.df)
-
 # merge relative specificity
 h3k27ac.TE.436.spec.scores <- merge(h3k27ac.TE.436peak.full.clean, spec.scores.df, by = 'coord.TE')
 
@@ -330,7 +309,7 @@ h3k27ac.TE.436.spec.scores %>%
   dplyr::slice(ceiling(0.1 * n())) %>%
   pull(specificity.score)
 
-# pick only the 250 regions hat sig gain accessibility and do the scoreplot only on those
+# pick only the 250 regions that sig gain accessibility and do the scoreplot only on those
 # MACS_peak_752 is VISTA enh
 # MACS_peak_1962 is ectopic enh close to tent4b gene
 h3k27ac.TE.436.spec.scores %>% 
@@ -349,10 +328,8 @@ score.plot.250DA <- h3k27ac.TE.436.spec.scores[,!c(11:77)] %>%
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
 ###############################################################################################################################
-
 # R
 # 05 - L2MIR integrant analysis
-
 # create a UMAP
 set.seed(1604)
 l2mir.436.umap <- uwot::umap(
@@ -369,9 +346,8 @@ l2mir.436.umap.full <- l2mir.436.umap %>%
   merge(h3k27ac.TE.436peak.full.clean, by = "coord.TE", all.x = T, all.y = F)
 
 # quantification of k27ac over all l2/mir ints from my H3K27ac cut and tag using bigwig average over bed
-dir <- "C:/Users/dmilovan/Desktop/X/int-lvl/quant/"
+dir <- "supplementary_data/"
 files <- list.files(path = dir, pattern = "\\.tab$", full.names = TRUE)
-
 data <- files %>%
   map(function(file) {
     df <- fread(file) %>%
@@ -405,8 +381,6 @@ l2mir.436.umap.full.v2 <- l2mir.436.umap.full.v2 %>%
 l2mir.436.umap.full.v2 <- l2mir.436.umap.full.v2 %>%
   mutate(is.GOA = case_when(peak.ID %in% DA.250.up$peak.ID ~ 'Yes',
                                TRUE ~ 'No'))
-l2mir.436.umap.full.v2 %>% 
-  fwrite("C:/Users/dmilovan/Desktop/X/int-lvl/202404_L2MIR-436bound_UMAP.csv") # this table is given in sup
 
 # projected info plots
 # projecting GOA
@@ -498,9 +472,6 @@ p.intestine <- l2mir.436.umap.full.v2 %>%
                   aes(x = UMAP1, y = UMAP2, label = paste0(SYMBOL,":",TE)), nudge_x = 1, nudge_y = 1) +
   theme_bw() +
   theme(aspect.ratio = 1) 
-p.intestine
-ggsave(paste0("C:/Users/dmilovan/Desktop/X/int-lvl/umap/202504_l2mir-436-k27ac_small-intestine_ManualColor.pdf"), plot = p.intestine)
-
 # brain - angular gyrus - PACSIN1
 p.angularGyrus <- l2mir.436.umap.full.v2 %>% 
   arrange(H3K27ac_angular_gyrus) %>%
@@ -512,8 +483,6 @@ p.angularGyrus <- l2mir.436.umap.full.v2 %>%
                   aes(x = UMAP1, y = UMAP2, label = paste0(SYMBOL,":",TE)), nudge_x = 1, nudge_y = 1) +
   theme_bw() +
   theme(aspect.ratio = 1) 
-p.angularGyrus
-ggsave(paste0("C:/Users/dmilovan/Desktop/X/int-lvl/umap/202504_l2mir-436-k27ac_angular-gyrus_ManualColor.pdf"), plot = p.angularGyrus)
 
 # examples
 # coord.TE: chr10:79938463-79938615: MIRb_hs2223
@@ -530,4 +499,4 @@ p.examples <- l2mir.436.umap.full.v2 %>%
   geom_text_repel(data = l2mir.436.umap.full.v2 %>% dplyr::filter(coord.TE %in% examples), aes(label = TE)) +
   theme_bw() +
   theme(aspect.ratio = 1) 
-p.examples
+
