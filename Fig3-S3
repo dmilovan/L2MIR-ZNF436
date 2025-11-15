@@ -1,3 +1,27 @@
+# R libraries
+library(data.table)
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+library(viridisLite)
+library(viridis)
+library(ggrepel)
+library(enrichplot)
+library(corrplot)
+library(gplots)
+library(pheatmap)
+library(reshape)
+library(RColorBrewer)
+library(philentropy)
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+library(BSgenome.Hsapiens.UCSC.hg19)
+library(TxDb.Mmusculus.UCSC.mm9.knownGene)
+library(karyoploteR)
+library(clusterProfiler)
+require(DOSE)
+organism = "org.Hs.eg.db"
+library(organism, character.only = TRUE)
+
 # R
 # 01 - single cell fetal expression, bulk human heart dev expression and cm diff expression - external datasets download and plotting
 # CT.Exp is the sup file from: GSE156793_S6_gene_expression_celltype Cao, et al. 2022 sc-RNA seq fetal expression
