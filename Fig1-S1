@@ -58,6 +58,7 @@ python3 pyTEnrich.py -i /home/duc/samba/projects/danica/2402_kzfp_encodeHistone/
 #################################################################################################################################################################################
 # python
 # 02 - pyTEnrich KZFP over tE
+# TE files have previously been generated and defined for Imbeault et al., 2017 and de Tribolet-Hardy et al., 2023
 
 # singularity exec docker://registry.c4science.ch/lvg/pyenv:v3 ipython --no-autoindent
 from os.path import basename
@@ -358,11 +359,9 @@ all_df.to_csv("../results/TE_bound_notbound_x_Histone_x_tissues.csv", index=Fals
 #################################################################################################################################################################################
 # R
 # 06 - data processing for representation
-
 # define useful variables
 L2MIR <- as.factor(c('L2','L2a','L2b','L2c','L2d','L2d2',
                      'MIR3','MIRb','MIRc','MIR'))
-
 # defining function to combine fisher stat later at odds-ratio summary
 # define fisher method function to use for combining p-values
 fisher_method <- function(p_values) {
@@ -372,19 +371,17 @@ fisher_method <- function(p_values) {
   return(combined_p_value)
 }
 
-# this is a table in supplementary that is the final output of giggle scoring [obtained in 03 of this section]
+# this is a table that is the final output of giggle scoring [obtained in 03 of this section] 
+# too large for upload, look at the previous code for generating the file
 m <- fread('C:/Users/dmilovan/Desktop/X/TE_x_ZNF_x_Histone_x_tissues.csv')
 
 # encode chip-s metadata of the data downloaded
 metadata <- fread('Y:/danica/2402_kzfp_encodeHistone/data/download/metadata.tsv')
-
 # in this manuscript, we focused only on tissue data
 metadata.tissue <- metadata[metadata$`Biosample type` == 'tissue',]
 levels(as.factor(metadata.tissue$`Biosample term name`))
-
 # subset final giggle table for only tissue derived data
 m.tissue <- m[m$tissue %in% metadata.tissue$`Biosample term name`,]
-
 # clean by taking only the relevant columns
 m.tissue.c <- m.tissue[,c(2,3,12,13,7,10,11)]
 levels(as.factor(m.tissue.c$tissue))
@@ -392,7 +389,7 @@ levels(as.factor(m.tissue.c$tissue))
 # TE as an observation of interest 
 # take the mean of combo score accros specific comibnations; what it does is that it calculates the mean across different tissue replicates 
 # this one is to be used for dimension reduction as an  input
-    # mean cause there are more than one replicate of hmark-tissue per kzfp-te combination; so i take the mean of the composite enrichment score for a specific combination
+    # mean cause there are more than one replicate of hmark-tissue per kzfp-te combination; take the mean of the composite enrichment score for a specific combination
 n <-  m.tissue.c %>%
   group_by(TEsubFam, ZNF, Hmark, tissue) %>%
   summarize(
@@ -413,12 +410,14 @@ g.c$combo_fisher <- ifelse(g.c$combo_fisher == 0, 1e-300, g.c$combo_fisher)
 # pivoting data so that my rows are different TEs and the combo score from the rest is filled out in the data frame wide format 
 n.w <- n %>% 
   pivot_wider(names_from = c(ZNF, Hmark, tissue), values_from = combo_score, values_fill = 0) 
-# I am inflating data with zeroes, due to many combinations not being present, 
+
+# conceptual note - many combinations are not being present, 
 # e.g kzfp-te pairs: ZNF700 doesn't sig bind Alu elements - ergo score 0
-# This is the 'drawback' of this approach leading to the data inflation with 0s, and adding to the umap bulk of TE subfams 
-# Though this supports the whole point of KZFP-based stratification, cause if the TE subfam is not often targeted by kzfps, it will behave like there are many 0s
+# This is the 'drawback' of this enrichment-based approach leading to the data inflation with 0s, and adding to the umap bulk of TE subfams 
+# Though this supports the whole point of KZFP-based stratification, cause if the TE subfam is not often targeted by kzfps, 
+# many confounding biological effects are described here with 0s
 # the problem is if there is really refined TEsubfam-TE pair, which will be specific strong pair; the approach penalizes those individual 1-to-1 relationships
-# for me it wasn't an issue, because the point would be to look for global, systematic pairings
+# here we look for global, systematic pairings
 # However, if the question is different, looking for more 1-to-1 relationships, the data should be dealt with in a different manner
 
 n.w.m <- as.matrix(n.w[,2:ncol(n.w)])
@@ -430,8 +429,10 @@ res.te <- umap(n.w.m, n_neighbors = 10, metric = "euclidean")
   n.df <- data.frame(res.te$layout)
   n.df.c <- data.frame(TEsubFam = rownames(n.df), n.df)
 
-nn <- merge(n.df.c, m.tissue.c, by = "TEsubFam", no.dups = F) 
+# n.df.c file in supplementary_data - coordinates of TEsubFams after running UMAP on giggle output
+n.df.c <- fread("supplementary_data/202403_umap_res_mean_10neigh_te.csv")
 
+nn <- merge(n.df.c, m.tissue.c, by = "TEsubFam", no.dups = F) 
 # summarize hmark enrichment across tissues for projecting onto the umap
 nn.hmark <- nn %>%
   group_by(TEsubFam, X1, X2, Hmark) %>%
@@ -457,8 +458,10 @@ nn.w.plot <- function(nn.hmark, hmark) {
 
 
 # BACK TO INFO ABOUT TES IN GENERAL
-# taking the TEs file to label subfamilies on a family level - this is a standard Trono lab file for TE integrant coordinates in hg19, with additional TE classification info
-# the difference to dfam annotation is LTR merged with 'int' segmenets for full ERVs, as described in many previous Trono lab publications. e.g. de Tribolet-Hardy, et al. 2023
+# taking the TEs file to label subfamilies on a family level - this is a standard Trono lab file for TE integrant coordinates in hg19, 
+# with additional TE classification info
+# the difference to dfam annotation is LTR merged with 'int' segmenets for full ERVs, 
+# as described in previous Trono lab publications. e.g. de Tribolet-Hardy, et al. 2023
 te <- fread('U:/Team LVG/Danica/MY_DATA/LVG_data/resources/human/LVG/1811_hg19_TE_repmask_LTRm.bed') %>% 
   setNames(c('chr','chrStart','chrEnd','sfam','score','strand','TEFam','TEsubFam')) %>%
   dplyr::select(TEFam,TEsubFam)
@@ -474,8 +477,7 @@ te.z <- cbind(te.cc, te.ccc)
 
 # projected information of TEs: age, KZFP unbound/bound data
 # manually curated (DM and OR) age based on the dfam information
-UMAP4age = data.table::fread("1-DFAM_consensus/202407_TEsubFam_coord_age1_curated.txt")
-
+UMAP4age <- fread("supplementary_data/202407_TEsubFam_coord_age1_curated.txt")
 # merge with TEFam info
 nnn <- merge(n.df.c, g, by = "TEsubFam", all.x = TRUE, all.y = FALSE)
 nnn <- nnn %>%
@@ -518,12 +520,19 @@ b.plot <- ggplot(b, aes(x = TEsubFam, y = mean_odds, fill = status)) +
   facet_wrap(.~Hmark) +
   stat_compare_means(aes(group = status), label = "p.signif", method = "t.test", hide.ns = TRUE)
 
-
-
-
-
-
-
-
-
-
+nn.hmark.age <- merge(nn.hmark, UMAP4age, by = "TEsubFam")
+nn.hmark.age.w <- nn.hmark.age %>%
+  dplyr::filter(Hmark %in% c("H3K27ac","H3K9me3")) %>%
+  dplyr::select(TEsubFam, Hmark, mean_odds, age1.curated) %>%
+  pivot_wider(names_from = Hmark, values_from = mean_odds) %>%
+  mutate(label_flag = ifelse(grepl("Alu", TEsubFam) | TEsubFam %in% L2MIR, TEsubFam, NA))
+ageVSmeanOdds.scatterplot <- nn.hmark.age.w %>%
+  ggplot(aes(x = log2(H3K27ac + 1),y = log2(H3K9me3 + 1), # add small count to not get log0
+    color = age1.curated)) +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_smooth(method = "loess", span = 1, se = TRUE) +
+  scale_color_viridis(option = "magma", direction = -1) + 
+  geom_text_repel(aes(label = label_flag), na.rm = TRUE, size = 3, max.overlaps = Inf) +
+  theme_bw() +
+  theme(aspect.ratio = 1) +
+  labs(x = "log2(H3K27ac mean odds)", y = "log2(H3K9me3 mean odds)", color = "Age (Mya)")
