@@ -1,7 +1,29 @@
-# TURBO-ID
+# R libraries
+library(data.table)
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+library(viridisLite)
+library(viridis)
+library(ggrepel)
+library(enrichplot)
+library(corrplot)
+library(gplots)
+library(pheatmap)
+library(reshape)
+library(RColorBrewer)
+library(limma) 
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+library(BSgenome.Hsapiens.UCSC.hg19)
+library(TxDb.Mmusculus.UCSC.mm9.knownGene)
+require(DOSE)
+organism = "org.Hs.eg.db"
+library(organism, character.only = TRUE)
+library(patchwork)
+library(qpdf)
 
 # R 
-# 01 - data processing from MS 
+# 01 - TurboID - data processing from MS 
 
 source("C:/Users/dmilovan/Documents/MY_DATA/DM_desk/R_scripts/commonFuns.R") # check out other Trono lab publications, such as de Tribolet-Hardy, et al. 2023
 library(clusterProfiler)
@@ -22,7 +44,7 @@ library(viridisLite)
 library(viridis)
 library(stringr)
 
-cm.maxquant.data <- as.data.frame(fread("U:/Team LVG/Danica/MY_DATA/DM_bench/TiD/202405_CM_results/proteinGroups.txt"))
+cm.maxquant.data <- as.data.frame(fread("supplementary_data/proteinGroups.txt"))
 View(cm.maxquant.data)
 
 ### Read in the data and prepare
@@ -45,34 +67,17 @@ Group <- gsub("_R(\\d+)", "", Group)
 labels <- gsub("LFQ_intensity_", "", colnames(cm.maxquant.data.u[, grep("^LFQ", colnames(cm.maxquant.data.u))]))
 
 # What is the design
-design2 <- data.frame(label=labels,
+design <- data.frame(label=labels,
                      condition=Group,
                      replicate=rep)
-
 # manual change of design matrix for comparisons
-design2$condition <- c('dK_bio','dK_bio','dK_bio','dK','dK', 'dK','GFP','GFP','436','436','436','wt','wt','wt','436_bio','436_bio','436_bio','436','436','436')
-design2$replicate <- c(1,2,3,4,5,6,2,3,1,2,3,1,2,3,4,5,6,7,8,9)
-design3 <- design2[-c(9,10,11),]
-design4 <- design2
-design4$condition <- c('dK_bio','dK_bio','dK_bio',
-                       'dK','dK','dK',
-                       'GFP','GFP',
-                       'TRE_ZNF436','TRE_ZNF436','TRE_ZNF436',
-                       'wt','wt','wt',
-                       'ZNF436_bio','ZNF436_bio','ZNF436_bio',
-                       'ZNF436','ZNF436','ZNF436')
-design4
-design5 <- design4[-c(9:11),]
-design5
+design5 <- design[-c(9:11),]
 design5$condition <- c('dK','dK','dK','dK','dK','dK',
                        'GFP','GFP','wt','wt','wt',
                        'ZNF436','ZNF436','ZNF436','ZNF436','ZNF436','ZNF436')
 design5$replicate <- c(1,2,3,4,5,6,
                        1,2,1,2,3,
                        1,2,3,4,5,6)
-
-# design 2 is all 436 samples together (9 of those, +b, -b, pTRE+b), and design 3 is w/o pTRE+b samples
-
 # make a table with the comparison design
 ?make_se
 se <- make_se(cm.maxquant.data.u, grep("^LFQ", colnames(cm.maxquant.data.u)), design5)
@@ -107,7 +112,7 @@ heatmap.2(dat, scale='none', col=c('white', 'black'), trace='none', key=F)
 # MNAR <- names(se.norm) %in% proteins_MNAR
 # se.imp <- impute(se.norm, fun="QRILC", tune.sigma=0.1)
 
-set.seed(16041995) # important to use the same number, otherwise it gives you slightly different results :/
+set.seed(16041995) # important to use the same number, otherwise it gives you slightly different results
 # se.imp <- impute(se.norm, fun="mixed", randna=!MNAR, mar="knn", mnar="MinProb")
 tmp_imp <- impute(se.norm, fun = "MinProb", q = 0.05) #var of the distribution of the imputed NAs, most important param to check and change when imputing
 tmp_imp_knn <- impute(se.norm, fun = "knn", rowmax = 0.8) 
@@ -135,28 +140,13 @@ plot_imputation(se.norm, se.imp)
 # 02 - data analysis for comparisons and representation
 # DE
 
-# A. here I am splitting individually +external.biotin vs. -external.biotin samples
-# samples comparisons used for representation are ZNF436_bio_vs_GFP and dK_bio_vs_GFP
-contrasts <- list(c("TRE_ZNF436_vs_ZNF436_bio"), c("TRE_ZNF436_vs_ZNF436"),
-                  c("ZNF436_bio_vs_ZNF436"),c("dK_bio_vs_dK"),
-                  c("TRE_ZNF436_vs_dK_bio"), c("TRE_ZNF436_vs_dK"),
-                  c("ZNF436_bio_vs_dK_bio"),c("ZNF436_bio_vs_dK"),
-                  c("ZNF436_vs_dK_bio"), c("ZNF436_vs_dK"),
-                  c("TRE_ZNF436_vs_GFP"), c("TRE_ZNF436_vs_wt"),
-                  c("ZNF436_bio_vs_GFP"), c("ZNF436_bio_vs_wt"),
-                  c("ZNF436_vs_GFP"), c("ZNF436_vs_wt"),
-                  c("dK_bio_vs_GFP"), c("dK_bio_vs_wt"),
-                  c("dK_vs_GFP"), c("dK_vs_wt"), c("GFP_vs_wt"),
-                  c("ZNF436_bio_vs_dK_bio_vs_GFP"))
-
-# B. Here, +/-extrenal.biotin samples are pulled
-# sapmple comparison is ZNF436_vs_dK: it is 6vs6 samples; TRE_ZNF436_sampels are excluded
+# sapmple comparison is ZNF436_vs_dK: it is 6vs6 samples; TRE_ZNF436_samples were are excluded
 contrasts5 <- list(c("ZNF436_vs_dK"), 
                   c("ZNF436_vs_GFP"), c("ZNF436_vs_wt"),
                   c("dK_vs_GFP"), c("dK_vs_wt"), c("GFP_vs_wt"))
 
 for (contrast in contrasts){
-  outdir <- paste0("C:/Users/dmilovan/Desktop/data/TiD/202410/results/tables-11", contrast)
+  outdir <- paste0("supplementary_data/tables", contrast)
   mydircreate(outdir)
   se.diff <- DEP::test_diff(se.imp, type="manual", test=contrast)
   dep <- add_rejections(se.diff, alpha = 0.05, lfc = log2(1.5))
@@ -182,10 +172,8 @@ for (contrast in contrasts){
   write.table(xout.2[o, ], paste0(outdir, "/table_all_", contrast, ".xls"), sep="\t", row.names=F)
 }
 
-############
-# PLOTTING
-# full length
-znf436vsGFP.cm <- fread('C:/Users/dmilovan/Desktop/data/TiD/final/tables9_table_ZNF436_bio_vs_GFP.xls')
+################################################################################################################
+znf436vsGFP.cm <- fread('supplementary_data/tables9_table_ZNF436_bio_vs_GFP.xls')
 vol.436vsGFP.cm <- ggplot(znf436vsGFP.cm, aes(x = ZNF436_bio_vs_GFP_ratio, y = -log10(ZNF436_bio_vs_GFP_p.adj))) + 
   geom_point(alpha = 0.5, size = 3) +
   scale_color_viridis(discrete=TRUE, option = 'E') +
@@ -200,7 +188,7 @@ vol.436vsGFP.cm <- ggplot(znf436vsGFP.cm, aes(x = ZNF436_bio_vs_GFP_ratio, y = -
   geom_text_repel(data = znf436vsGFP.cm[name == 'ZNF436'], aes(label = name), col = '#007480', size = 5, force = 1, nudge_y = 0.5, nudge_x = 0.5)
 
 # same for deltaKRAB
-dKvsGFP.cm <- fread('C:/Users/dmilovan/Desktop/data/TiD/final/tables9_table_dK_bio_vs_GFP.xls')
+dKvsGFP.cm <- fread('supplementary_data/tables9_table_dK_bio_vs_GFP.xls')
 vol.dKvsGFP.cm <- ggplot(dKvsGFP.cm, aes(x = dK_bio_vs_GFP_ratio, y = -log10(dK_bio_vs_GFP_p.adj))) + 
   geom_point(alpha = 0.5, size = 3) +
   scale_color_viridis(discrete=TRUE, option = 'E') +
@@ -253,7 +241,7 @@ tid.l$role <- NA
 
 # fl vs. dk final 
 # the tables is w/o TRE samples, and bio-nobio samples are pulled together, resulting w/ 6vs6 
-FLvsDK.cm <- fread('C:/Users/dmilovan/Desktop/data/TiD/final/tables10_noTRE_6vs6_table_ZNF436_vs_dK_manAnno.csv') %>%
+FLvsDK.cm <- fread('supplementary_data/tables10_noTRE_6vs6_table_ZNF436_vs_dK_manAnno.csv') %>%
   mutate(role = ifelse(role == "RNAPOl2", "RNAPOL2", role))
 
 FLvsDK.cm.volplot <- FLvsDK.cm %>%
@@ -276,6 +264,7 @@ final <- FLvsDK.cm %>%
   dplyr::select(name, ZNF436_vs_dK_ratio, ZNF436_vs_dK_p.adj, ZNF436_vs_dK_significant, role) %>%
   dplyr::rename(ratio =  ZNF436_vs_dK_ratio, p.adj = ZNF436_vs_dK_p.adj, sig = ZNF436_vs_dK_significant) %>%
   mutate(cond = 'FLvsDK', day = 15) 
+
 tid.final <- rbind(tid.l, final, fill = T)
 tid.final <- tid.final %>%
   mutate(is.fl.cm = ifelse(name %in% names2, 'Yes','No')) %>%
@@ -330,18 +319,17 @@ tid.bafs %>%
   theme(aspect.ratio = 1)
 
 #################################################################################################################################################################################
-#################################################################################################################################################################################
 # ATAC
 
 # bash
 # 01 - bedtools intersect 
-bedtools intersect -wao -a d0d15_cat_sorted.bed -b 
+bedtools intersect -wao -a supplementary_data/d0d15_cat_sorted.bed -b supplementary_data/PRJNA307573_ZNF436gfp_HEK293_peaks_macs80.bed > d0d15peak.all
 
-d0d15peak.all <- fread('C:/Users/dmilovan/Desktop/data/ATAC/peaks/d0d15_cat_sorted_d0atac_d15atac__436peaks.bed') %>%
+# R
+d0d15peak.all <- fread('supplementary_data/d0d15peak.all') %>%
   dplyr::select(-c(12:14,16:17)) %>%
   setNames(c('chrom','start','end','chrom.d0','start.d0','end.d0','overlap.d0',
-             'chrom.d15','start.d15','end.d15','overlap.d15','peak.ID'))
-d0d15peak.all <- d0d15peak.all %>%
+             'chrom.d15','start.d15','end.d15','overlap.d15','peak.ID')) %>%
   mutate(is.peak.d0 = case_when(chrom.d0 != '.' ~ 'Yes'),
          is.peak.d15 = case_when(chrom.d15 != '.' ~ 'Yes'),
          is.peak = case_when(chrom.d0 != '.' & chrom.d15 != '.' ~ 'both',
@@ -349,14 +337,10 @@ d0d15peak.all <- d0d15peak.all %>%
                              chrom.d0 == '.' & chrom.d15 != '.' ~ 'd15'))
 d0d15peak.all$atac.ID <- paste0('peak_',rownames(d0d15peak.all))
 
-peak436.is.atac.peak <- d0d15peak.all %>% dplyr::select(peak.ID) %>% distinct() %>%
-  dplyr::filter(peak.ID != '.') 
-
 # genomic features od regions
 txdb <- TxDb.Hsapiens.UCSC.hg19.knownGene
 annoDb = "org.Hs.eg.db"
-peak436.atac.annot = 
-  d0d15peak.all %>%
+peak436.atac.annot <- d0d15peak.all %>%
   dplyr::filter(peak.ID != '.') %>% 
   dplyr::select(chrom, start, end, peak.ID) %>%
   GenomicRanges::makeGRangesFromDataFrame(.,
@@ -378,7 +362,7 @@ peak436.atac.annot =
                                                  grepl("Exon", annotation) ~ "Exon",
                                                  TRUE ~ annotation))
 
-d15.ctrl.436peak <- fread('C:/Users/dmilovan/Desktop/data/ATAC/intersect/d15_ctrl__436peaks.bed') %>%
+d15.ctrl.436peak <- fread('supplementary_data/d15-atac-merge_436peaks.bed') %>%
   setNames(c('chrom','start','end','chrom.436','start.436','end.436','peak.ID','score','overlap')) %>%
   mutate(is.436peak.d15 = case_when(peak.ID != '.' ~ 'Yes', TRUE ~ NA)) %>%
   merge(peaks436, by = 'peak.ID', all = T)
@@ -394,7 +378,7 @@ atac.meta <- tribble(
   "d15_kd_r2_436peaks.tab",                          "kd",       2,          15,
   "d15_kd_r3_436peaks.tab",                          "kd",       3,          15
 )
-atac.path <- "C:/Users/dmilovan/Desktop/data/ATAC/quant/"
+atac.path <- "supplementary_data/"
 # Read and combine all files
 d15.436atac.all <- atac.meta %>%
   mutate(full_path = file.path(atac.path, file)) %>%
@@ -492,16 +476,6 @@ GOA.te <- merge(DA.250.up %>% dplyr::select(peak.ID, is.GOA),
                                    annotation.v2 == "Intronic" ~ "CRE",
                                    TRUE ~ "genic"))
 
-# merge with DEGs that got asigned nearest 436 peak
-GOA.te.deg <- GOA.te %>%
-  merge(DE.df.peaks.deg %>%
-          dplyr::filter(Timepoint == "d15") %>%
-          dplyr::select(ENSEMBL, symbol, genename, foldChange, diffExpr, is.436.peak.vicinity,
-                        peak.ID, dist.gene.tss2peak) %>% distinct, by = "peak.ID", all.x = T, all.y = F)
-head(GOA.te.deg)
-GOA.te.deg %>% dplyr::filter(diffExpr == "Yes") %>% pull(symbol) %>% unique() %>% print() # 34
-
-
 # what about going peak2gene
 anno <- ChIPseeker::annotatePeak(
   GenomicRanges::makeGRangesFromDataFrame(DA.250.up),
@@ -525,16 +499,10 @@ DA.250.up %>% dplyr::select(annotation.v2) %>% dplyr::count(annotation.v2) %>% p
 # merge w degs
 DA.250.deg <- DA.250.up %>% dplyr::select(peak.ID, is.GOA, ENSEMBL, SYMBOL, GENENAME, distanceToTSS) %>% 
   distinct() %>%
-  merge(DE.df.peaks.deg %>%
+  merge(DE.df.peaks.deg %>% # defined in section 3 
           dplyr::filter(Timepoint == "d15") %>%
           dplyr::select(foldChange, diffExpr, peak.ID) %>% distinct, by = "peak.ID", all.x = T, all.y = F)
 DA.250.deg %>% dplyr::filter(diffExpr == "Yes") %>% View() # 34 # 42
-
-# d15 peaks 
-d15.ctrl.436peak <- fread('C:/Users/dmilovan/Desktop/data/ATAC/intersect/d15_ctrl__436peaks.bed') %>%
-  setNames(c('chrom','start','end','chrom.436','start.436','end.436','peak.ID','score','overlap')) %>%
-  mutate(is.436peak.d15 = case_when(peak.ID != '.' ~ 'Yes', TRUE ~ NA)) %>%
-  merge(peaks436, by = 'peak.ID', all = T)
 
 # annotate the genomic features of the peaks
 peak436.atac.anno = 
@@ -576,7 +544,89 @@ peaks436.atac.anno.plot <- peak436.atac.annot %>%
         panel.grid = element_blank(), 
         aspect.ratio = 1) 
 
+# NUCLEOSOME POSITIONING AND FOOTPRINTING ANALYSIS
+# NucleoATAC from atac bams on GOA regions +/- 300 bp extensions, default params
+mat <- fread(
+  "supplementary_data/ZNF436motif-GOAnarrow_nc-position-conditions_clean-v2.tab",
+  fill = TRUE
+)
+dim(mat)
+head(mat)
 
+ctrl_cols <- grep("^ctrl", names(mat))
+kd_cols <- grep("^kd", names(mat))
+ctrl_mat <- as.matrix(mat[, ..ctrl_cols])
+kd_mat   <- as.matrix(mat[, ..kd_cols])
 
+colnames(ctrl_mat) <- paste0("bin_", seq_len(ncol(ctrl_mat)))
+colnames(kd_mat) <- paste0("bin_", seq_len(ncol(kd_mat)))
+ctrl.df <- as.data.frame(ctrl_mat) %>%
+  mutate(condition = "ctrl",
+         region_id = row_number())
+kd.df <- as.data.frame(kd_mat) %>%
+  mutate(condition = "kd",
+         region_id = row_number())
+df <- rbind(ctrl.df, kd.df)
 
+dfl <- df %>%
+  pivot_longer(
+    cols = starts_with("bin_"),
+    names_to = "bin",
+    names_prefix = "bin_",
+    values_to = "occupancy"
+  ) %>%
+  mutate(bin = as.integer(bin)) %>%
+  group_by(condition) %>%
+  mutate(occupancy_z = scale(occupancy)[,1]) %>%
+  ungroup()
 
+region_depth <- dfl %>%
+  mutate(center = bin %in% center_idx,
+         flank  = bin %in% flank_idx) %>%
+  group_by(region_id, condition) %>%
+  summarize(
+    depth = mean(occupancy_z[flank]) - mean(occupancy_z[center]),
+    .groups = "drop"
+  )
+region_depth_wide <- region_depth %>%
+  pivot_wider(names_from = condition, values_from = depth) %>%
+  filter(!is.na(ctrl), !is.na(kd)) %>%
+  mutate(delta_depth = kd - ctrl)
+t.test(region_depth_wide$kd, region_depth_wide$ctrl, paired = TRUE)
+mean_ctrl <- mean(region_depth_wide$ctrl, na.rm = TRUE)
+mean_kd   <- mean(region_depth_wide$kd, na.rm = TRUE)
+region_depth %>%
+  dplyr::select(condition, depth) %>% unique() %>%
+  ggplot(aes(x=condition, y=depth, fill=condition)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 1) +
+  ylab("NFR Depth (flank - center, z-scored)") +
+  stat_compare_means(method = "t.test", paired = T)
+
+# COMPUTE FUZZINESS
+ctrl_fuzziness <- apply(ctrl_mat, 1, function(occupancy) {
+  if (sum(occupancy) == 0) return(NA)  # avoid division by zero
+  weights <- occupancy / sum(occupancy)
+  mean_pos <- sum(seq_along(occupancy) * weights)
+  sqrt(sum(weights * (seq_along(occupancy) - mean_pos)^2))
+})
+kd_fuzziness <- apply(kd_mat, 1, function(occupancy) {
+  if (sum(occupancy) == 0) return(NA)
+  weights <- occupancy / sum(occupancy)
+  mean_pos <- sum(seq_along(occupancy) * weights)
+  sqrt(sum(weights * (seq_along(occupancy) - mean_pos)^2))
+})
+fuzz_df <- data.frame(
+  region_id = 1:nrow(ctrl_mat),
+  ctrl_fuzz = ctrl_fuzziness,
+  kd_fuzz = kd_fuzziness
+)
+t.test(fuzz_df$kd_fuzz, fuzz_df$ctrl_fuzz, paired = TRUE)
+fuzz_df_long <- reshape2::melt(fuzz_df, id.vars = "region_id",
+                               variable.name = "condition", value.name = "fuzziness")
+ggplot(fuzz_df_long, aes(x = condition, y = fuzziness, fill = condition)) +
+  geom_boxplot() +
+  theme_bw() +
+  theme(aspect.ratio = 1) +
+  ylab("Nucleosome fuzziness (weighted SD of occupancy)")
