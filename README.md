@@ -3,5 +3,5 @@ Scripts included in this directory were used for the analyses in the article
 
 The scripts for the analyses are sectioned according to the article figures.
 
-For the metadata files, as well as processed data tables, see "supplementary_data_files" directory
-! Some files may need to be obtained from scratch, but can be found in the cited publications 
+For the metadata files, as well as processed data tables, see "supplementary_data" directory
+! Some files may need to be obtained from scratch; and/or can be found in the cited publications 
